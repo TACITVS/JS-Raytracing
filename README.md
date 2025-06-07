@@ -2,33 +2,44 @@
 
 This repository contains an experimental WebGPU based game engine. The project uses a simple Entity Component System (ECS) via [bitECS](https://github.com/NateTheGreatt/bitECS) and demonstrates minimal WebGPU initialization.
 
-## Development
+## Installation
 
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
+Ensure you have [Node.js](https://nodejs.org/) version 18 or newer available.
+Clone the repository and install the dependencies:
 
-2. Build the TypeScript sources:
-   ```bash
-   npm run build
-   ```
+```bash
+git clone <repository-url>
+cd JS-Raytracing
+npm install
+```
 
-3. Open `index.html` in a browser with WebGPU support.
+## Building
+
+Compile the TypeScript sources to JavaScript:
+
+```bash
+npm run build
+```
+
+The generated files are placed in the `dist/` directory.
+
+## Running the Engine
+
+After building, open `index.html` in a WebGPU capable browser. This page
+initializes the engine and runs a simple scene.
 
 ## Demonstration
 
 After building the project you can load a small demo that creates and animates
-several entities. Compile the sources and open `demo.html` in a WebGPU enabled
-browser:
+several entities. Open `demo.html` in a WebGPU enabled browser:
 
 ```bash
 npm run build
-open demo.html # or use your browser of choice
+open demo.html # or use your preferred browser
 ```
 
-The demo uses the ECS and WebGPU initialization code from the engine to update a
-few rotating entities every frame.
+The demo shows multiple entities rotating while being updated by the ECS every
+frame.
 
 ## Goals
 
