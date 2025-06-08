@@ -1,29 +1,36 @@
 export async function initWebGPU(canvas: HTMLCanvasElement): Promise<{ device: GPUDevice; context: GPUCanvasContext; format: GPUTextureFormat } | null> {
-    const nav: any = navigator as any;
-    if (!nav.gpu) {
+    if (!navigator.gpu) {
         console.error("WebGPU not supported.");
         return null;
     }
-    const adapter = await nav.gpu.requestAdapter();
+    const adapter = await navigator.gpu.requestAdapter();
     if (!adapter) {
         console.error("Failed to get GPU adapter");
         return null;
     }
     const device = await adapter.requestDevice();
-    const context = canvas.getContext("webgpu") as any;
-    const format = nav.gpu.getPreferredCanvasFormat();
+    const context = canvas.getContext("webgpu");
+    if(!context) {
+        console.error("Failed to get WebGPU context");
+        return null;
+    }
+    const format = navigator.gpu.getPreferredCanvasFormat();
     context.configure({ device, format, alphaMode: "opaque" });
     return { device, context, format };
 }
 
-export function createRenderPipeline(device: GPUDevice, format: GPUTextureFormat) {
+export function createRenderPipeline(device: GPUDevice, format: GPUTextureFormat): GPURenderPipeline {
     const shaderModule = device.createShaderModule({
         code: `
             @vertex
             fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> @builtin(position) vec4<f32> {
-                let x = f32(in_vertex_index) * 0.5 - 1.0;
-                let y = f32(in_vertex_index % 2u) * 0.5;
-                return vec4<f32>(x, y, 0.0, 1.0);
+                let pos = array<vec2<f32>, 3>(
+                    vec2<f32>(0.0, 0.5),
+                    vec2<f32>(-0.5, -0.5),
+                    vec2<f32>(0.5, -0.5)
+                );
+
+                return vec4<f32>(pos[in_vertex_index], 0.0, 1.0);
             }
 
             @fragment
@@ -60,7 +67,7 @@ export function render(device: GPUDevice, context: GPUCanvasContext, pipeline: G
         colorAttachments: [
             {
                 view: textureView,
-                clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
+                clearValue: { r: 0.1, g: 0.2, b: 0.3, a: 1.0 },
                 loadOp: "clear",
                 storeOp: "store",
             },
