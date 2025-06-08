@@ -2,10 +2,37 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>JS Raytracing Engine</title>
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #1a1a1a;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+  </style>
 </head>
 <body>
-  <canvas width="800" height="600"></canvas>
+  <canvas id="webgpu-canvas"></canvas>
+
+  <!-- This is the import map -->
+  <script type="importmap">
+  {
+    "imports": {
+      "bitecs": "./node_modules/bitecs/dist/index.mjs"
+    }
+  }
+  </script>
+
+  <!-- The main script is loaded after the map -->
   <script type="module" src="./dist/index.js"></script>
 </body>
 </html>

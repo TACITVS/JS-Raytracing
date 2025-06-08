@@ -1,13 +1,14 @@
 import { createWorld, addEntity, addComponent } from 'bitecs';
-import { Transform, Mesh } from '../ecs/components';
-import { TransformSystem } from '../ecs/systems';
-import { initWebGPU, createRenderPipeline, render } from '../renderer/gpu';
+// Add the .js extension to the relative file imports
+import { Transform, Mesh } from '../ecs/components.js';
+import { TransformSystem } from '../ecs/systems.js';
+import { initWebGPU, createRenderPipeline, render } from '../renderer/gpu.js';
 
 export async function runDemo() {
   // Select the canvas by its ID
   const canvas = document.getElementById('webgpu-canvas') as HTMLCanvasElement | null;
   if (!canvas) throw new Error('Canvas element with ID "webgpu-canvas" not found');
-
+  
   // Make the canvas visually sharp on high-DPI displays
   const devicePixelRatio = window.devicePixelRatio || 1;
   canvas.width = canvas.clientWidth * devicePixelRatio;

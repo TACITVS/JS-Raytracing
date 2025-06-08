@@ -1,7 +1,8 @@
 import { createWorld, addEntity, addComponent } from 'bitecs';
-import { Transform, Mesh } from './ecs/components';
-import { TransformSystem } from './ecs/systems';
-import { initWebGPU, createRenderPipeline, render } from './renderer/gpu';
+// Add the .js extension to the relative file imports
+import { Transform, Mesh } from './ecs/components.js';
+import { TransformSystem } from './ecs/systems.js';
+import { initWebGPU, createRenderPipeline, render } from './renderer/gpu.js';
 
 async function main() {
   // Select the canvas by its ID

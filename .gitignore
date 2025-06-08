@@ -1,2 +1,8 @@
-node_modules/
-dist/
+# Dependencies
+/node_modules
+
+# Build output
+/dist
+
+# macOS folder attributes
+.DS_Store

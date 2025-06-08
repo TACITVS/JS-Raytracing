@@ -1,16 +1,15 @@
 {
   "compilerOptions": {
     /* Language and Environment */
-    "target": "es2017",
-    "lib": ["dom", "dom.iterable", "es2017"],
+    "target": "ES2022",
+    "lib": ["dom", "dom.iterable", "ES2022"],
     "types": ["@webgpu/types"],
 
     /* Modules */
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
     "rootDir": "src",
-    "resolveJsonModule": true,
-
+    
     /* Emit */
     "outDir": "dist",
     "sourceMap": true,

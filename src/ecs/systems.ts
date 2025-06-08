@@ -1,5 +1,6 @@
 import { IWorld, defineQuery, System } from 'bitecs';
-import { Transform } from './components';
+// Add the .js extension to the relative file import
+import { Transform } from './components.js';
 
 const transformQuery = defineQuery([Transform]);
 
