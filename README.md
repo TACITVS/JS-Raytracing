@@ -25,21 +25,16 @@ The generated files are placed in the `dist/` directory.
 
 ## Running the Engine
 
-After building, open `index.html` in a WebGPU capable browser. This page
-initializes the engine and runs a simple scene.
-
-## Demonstration
-
-After building the project you can load a small demo that creates and animates
-several entities. Open `demo.html` in a WebGPU enabled browser:
+After running `npm run build` start a simple HTTP server from the project root:
 
 ```bash
-npm run build
-open demo.html # or use your preferred browser
+npx http-server .
+# or
+python -m http.server
 ```
 
-The demo shows multiple entities rotating while being updated by the ECS every
-frame.
+Then open `http://localhost:8080/raytracing.html` in a WebGPU enabled browser.
+You can also visit `scene3d.html` for the rotating cube example.
 
 ## Goals
 
