@@ -19,65 +19,73 @@ export async function initWebGPU(canvas: HTMLCanvasElement): Promise<{ device: G
     return { device, context, format };
 }
 
-export function createRenderPipeline(device: GPUDevice, format: GPUTextureFormat): GPURenderPipeline {
+// This function creates a pipeline that simply draws a texture to the entire screen.
+// We use this to get the output of our compute shader onto the canvas.
+export function createFullScreenQuad(device: GPUDevice, format: GPUTextureFormat, textureView: GPUTextureView) {
     const shaderModule = device.createShaderModule({
         code: `
-            @vertex
-            fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> @builtin(position) vec4<f32> {
-                let pos = array<vec2<f32>, 3>(
-                    vec2<f32>(0.0, 0.5),
-                    vec2<f32>(-0.5, -0.5),
-                    vec2<f32>(0.5, -0.5)
-                );
+            @group(0) @binding(0) var mySampler: sampler;
+            @group(0) @binding(1) var myTexture: texture_2d<f32>;
 
-                return vec4<f32>(pos[in_vertex_index], 0.0, 1.0);
+            struct VertexOutput {
+                @builtin(position) position: vec4<f32>,
+                @location(0) tex_coord: vec2<f32>,
+            };
+
+            @vertex
+            fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> VertexOutput {
+                var output: VertexOutput;
+                let x = f32(in_vertex_index % 2u) * 2.0 - 1.0;
+                let y = f32(in_vertex_index / 2u) * 2.0 - 1.0;
+                output.position = vec4<f32>(x, -y, 0.0, 1.0);
+                output.tex_coord = vec2<f32>(f32(in_vertex_index % 2u), f32(in_vertex_index / 2u));
+                return output;
             }
 
             @fragment
-            fn fs_main() -> @location(0) vec4<f32> {
-                return vec4<f32>(1.0, 0.0, 0.0, 1.0);
+            fn fs_main(@location(0) tex_coord: vec2<f32>) -> @location(0) vec4<f32> {
+                return textureSample(myTexture, mySampler, tex_coord);
             }
         `,
     });
 
     const pipeline = device.createRenderPipeline({
-        layout: "auto",
-        vertex: {
-            module: shaderModule,
-            entryPoint: "vs_main",
-        },
+        layout: 'auto',
+        vertex: { module: shaderModule, entryPoint: 'vs_main' },
         fragment: {
             module: shaderModule,
-            entryPoint: "fs_main",
+            entryPoint: 'fs_main',
             targets: [{ format }],
         },
-        primitive: {
-            topology: "triangle-list",
-        },
+        primitive: { topology: 'triangle-strip' },
+    });
+    
+    const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+
+    const bindGroup = device.createBindGroup({
+        layout: pipeline.getBindGroupLayout(0),
+        entries: [
+            { binding: 0, resource: sampler },
+            { binding: 1, resource: textureView },
+        ],
     });
 
-    return pipeline;
+    return { pipeline, bindGroup };
 }
 
-export function render(device: GPUDevice, context: GPUCanvasContext, pipeline: GPURenderPipeline) {
-    const commandEncoder = device.createCommandEncoder();
+export function renderFullScreenQuad(commandEncoder: GPUCommandEncoder, context: GPUCanvasContext, pipeline: GPURenderPipeline, bindGroup: GPUBindGroup) {
     const textureView = context.getCurrentTexture().createView();
-
     const renderPassDescriptor: GPURenderPassDescriptor = {
-        colorAttachments: [
-            {
-                view: textureView,
-                clearValue: { r: 0.1, g: 0.2, b: 0.3, a: 1.0 },
-                loadOp: "clear",
-                storeOp: "store",
-            },
-        ],
+        colorAttachments: [{
+            view: textureView,
+            loadOp: "clear",
+            storeOp: "store",
+            clearValue: { r: 0, g: 0, b: 0, a: 1 },
+        }],
     };
-
     const passEncoder = commandEncoder.beginRenderPass(renderPassDescriptor);
     passEncoder.setPipeline(pipeline);
-    passEncoder.draw(3, 1, 0, 0);
+    passEncoder.setBindGroup(0, bindGroup);
+    passEncoder.draw(4, 1, 0, 0);
     passEncoder.end();
-
-    device.queue.submit([commandEncoder.finish()]);
 }
