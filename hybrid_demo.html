@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>JS Raytracing Engine - Compute Example</title>
+  <title>JS Raytracing - Hybrid Rendering Demo</title>
   <style>
     body, html {
       margin: 0;
@@ -26,17 +26,16 @@
   {
     "imports": {
       "bitecs": "./node_modules/bitecs/dist/index.mjs",
-      "gl-matrix": "https://esm.sh/gl-matrix@3.4.3",
-      "gltf-loader-ts": "./node_modules/gltf-loader-ts/dist/index.js"
+      "gl-matrix": "https://esm.sh/gl-matrix@3.4.3"
     }
   }
   </script>
   <script type="module">
-    import { Engine } from './dist/Engine.js';
-    new Engine().startup().catch(err => {
+    import { HybridDemo } from './dist/hybrid_demo.js';
+    new HybridDemo().startup().catch(err => {
         console.error(err);
         document.body.innerHTML = `<div style="color: white; padding: 20px;">
-            <h2>Error Initializing Engine</h2>
+            <h2>Error Initializing Demo</h2>
             <p>${err.message}</p>
             <p>Please ensure your browser supports WebGPU and it is enabled.</p>
         </div>`;

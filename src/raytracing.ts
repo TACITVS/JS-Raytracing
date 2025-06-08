@@ -16,7 +16,7 @@ async function main() {
     
     // Fetch the external shader file.
     // Our new build step ensures this file exists at the target location.
-    const shaderCode = await fetch('./shaders/raytracing.wgsl').then(res => res.text());
+    const shaderCode = await fetch('./dist/shaders/raytracing.wgsl').then(res => res.text());
     const shaderModule = device.createShaderModule({ code: shaderCode });
 
     const outputTexture = device.createTexture({
