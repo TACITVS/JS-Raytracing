@@ -6,8 +6,8 @@
     "types": ["@webgpu/types"],
 
     /* Modules */
-    "module": "es2020",
-    "moduleResolution": "nodenext",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
     "rootDir": "src",
     "resolveJsonModule": true,
 
