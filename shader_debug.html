@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shader Debug Test</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0,0,0,0.8);
+            padding: 15px;
+            border-radius: 8px;
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+            z-index: 1000;
+            max-width: 400px;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <strong>🔧 Shader Debug</strong><br><br>
+        <div id="logs"></div>
+    </div>
+    
+    <canvas id="webgpu-canvas"></canvas>
+    
+    <script type="module">
+        const logs = document.getElementById('logs');
+        
+        function log(message) {
+            console.log(message);
+            logs.innerHTML += message + '<br>';
+            logs.scrollTop = logs.scrollHeight;
+        }
+        
+        async function shaderDebugTest() {
+            try {
+                log("🎯 Starting shader debug...");
+                
+                // Basic WebGPU setup
+                const canvas = document.getElementById('webgpu-canvas');
+                const adapter = await navigator.gpu.requestAdapter();
+                const device = await adapter.requestDevice();
+                const context = canvas.getContext('webgpu');
+                
+                canvas.width = canvas.clientWidth;
+                canvas.height = canvas.clientHeight;
+                log(`Canvas: ${canvas.width} x ${canvas.height}`);
+                
+                const format = navigator.gpu.getPreferredCanvasFormat();
+                context.configure({
+                    device: device,
+                    format: format,
+                    alphaMode: 'opaque',
+                });
+                
+                // Test 1: Most basic possible shader
+                log("🧪 Test 1: Minimal shader");
+                try {
+                    const minimalShader = \`
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+}
+
+@vertex
+fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
+    var output: VertexOutput;
+    var pos = array<vec2<f32>, 3>(
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>( 1.0, -1.0),
+        vec2<f32>( 0.0,  1.0)
+    );
+    output.position = vec4<f32>(pos[vertexIndex], 0.0, 1.0);
+    return output;
+}
+
+@fragment
+fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+    return vec4<f32>(1.0, 0.0, 0.0, 1.0);
+}
+\`;
+                    
+                    const shaderModule = device.createShaderModule({ code: minimalShader });
+                    log("✅ Minimal shader compiled");
+                    
+                    const pipeline = device.createRenderPipeline({
+                        layout: 'auto',
+                        vertex: {
+                            module: shaderModule,
+                            entryPoint: 'vs_main',
+                        },
+                        fragment: {
+                            module: shaderModule,
+                            entryPoint: 'fs_main',
+                            targets: [{ format: format }],
+                        },
+                        primitive: {
+                            topology: 'triangle-list',
+                        },
+                    });
+                    log("✅ Minimal pipeline created");
+                    
+                    const encoder = device.createCommandEncoder();
+                    const pass = encoder.beginRenderPass({
+                        colorAttachments: [{
+                            view: context.getCurrentTexture().createView(),
+                            clearValue: { r: 0, g: 0, b: 0, a: 1 },
+                            loadOp: 'clear',
+                            storeOp: 'store'
+                        }]
+                    });
+                    
+                    pass.setPipeline(pipeline);
+                    pass.draw(3);
+                    pass.end();
+                    device.queue.submit([encoder.finish()]);
+                    
+                    log("✅ Test 1 complete - should see RED TRIANGLE");
+                    await new Promise(r => setTimeout(r, 2000));
+                    
+                } catch (error) {
+                    log(\`❌ Test 1 failed: \${error.message}\`);
+                    throw error;
+                }
+                
+                // Test 2: Check shader compilation with different syntax
+                log("🧪 Test 2: Alternative syntax");
+                try {
+                    const altShader = \`
+@vertex
+fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f {
+    var pos = array<vec2f, 6>(
+        vec2f(-0.5, -0.5),
+        vec2f( 0.5, -0.5),
+        vec2f(-0.5,  0.5),
+        vec2f(-0.5,  0.5),
+        vec2f( 0.5, -0.5),
+        vec2f( 0.5,  0.5)
+    );
+    return vec4f(pos[vertexIndex], 0.0, 1.0);
+}
+
+@fragment
+fn fs_main() -> @location(0) vec4f {
+    return vec4f(0.0, 1.0, 0.0, 1.0);
+}
+\`;
+                    
+                    const shaderModule2 = device.createShaderModule({ code: altShader });
+                    log("✅ Alternative shader compiled");
+                    
+                    const pipeline2 = device.createRenderPipeline({
+                        layout: 'auto',
+                        vertex: {
+                            module: shaderModule2,
+                            entryPoint: 'vs_main',
+                        },
+                        fragment: {
+                            module: shaderModule2,
+                            entryPoint: 'fs_main',
+                            targets: [{ format: format }],
+                        },
+                        primitive: {
+                            topology: 'triangle-list',
+                        },
+                    });
+                    log("✅ Alternative pipeline created");
+                    
+                    const encoder2 = device.createCommandEncoder();
+                    const pass2 = encoder2.beginRenderPass({
+                        colorAttachments: [{
+                            view: context.getCurrentTexture().createView(),
+                            clearValue: { r: 0, g: 0, b: 0, a: 1 },
+                            loadOp: 'clear',
+                            storeOp: 'store'
+                        }]
+                    });
+                    
+                    pass2.setPipeline(pipeline2);
+                    pass2.draw(6);
+                    pass2.end();
+                    device.queue.submit([encoder2.finish()]);
+                    
+                    log("✅ Test 2 complete - should see GREEN SQUARE");
+                    await new Promise(r => setTimeout(r, 2000));
+                    
+                } catch (error) {
+                    log(\`❌ Test 2 failed: \${error.message}\`);
+                    console.error("Test 2 error:", error);
+                }
+                
+                // Test 3: Check your actual G-Buffer shader
+                log("🧪 Test 3: Loading your G-Buffer shader");
+                try {
+                    const response = await fetch('./dist/shaders/gbuffer.wgsl');
+                    if (!response.ok) {
+                        throw new Error(\`Failed to load G-Buffer shader: \${response.status}\`);
+                    }
+                    const gbufferShaderCode = await response.text();
+                    log("✅ G-Buffer shader file loaded");
+                    log(\`Shader length: \${gbufferShaderCode.length} characters\`);
+                    
+                    // Try to compile it
+                    const gbufferModule = device.createShaderModule({ code: gbufferShaderCode });
+                    log("✅ G-Buffer shader compiled successfully");
+                    
+                    // Show first few lines
+                    const lines = gbufferShaderCode.split('\\n').slice(0, 5);
+                    log("📄 G-Buffer shader preview:");
+                    lines.forEach((line, i) => log(\`  \${i+1}: \${line}\`));
+                    
+                } catch (error) {
+                    log(\`❌ Test 3 failed: \${error.message}\`);
+                    console.error("G-Buffer shader error:", error);
+                }
+                
+                // Test 4: Check device capabilities
+                log("🔍 Test 4: Device capabilities");
+                try {
+                    log(\`Device label: \${device.label || 'none'}\`);
+                    
+                    const limits = device.limits;
+                    log(\`Max texture size: \${limits.maxTextureDimension2D}\`);
+                    log(\`Max bind groups: \${limits.maxBindGroups}\`);
+                    log(\`Max vertex attributes: \${limits.maxVertexAttributes}\`);
+                    
+                    const features = Array.from(device.features);
+                    log(\`Features: \${features.join(', ') || 'none'}\`);
+                    
+                } catch (error) {
+                    log(\`❌ Test 4 failed: \${error.message}\`);
+                }
+                
+                log("🎉 Shader debug complete!");
+                
+            } catch (error) {
+                log(\`💥 Shader debug failed: \${error.message}\`);
+                console.error("Full error:", error);
+            }
+        }
+        
+        shaderDebugTest();
+    </script>
+</body>
+</html>

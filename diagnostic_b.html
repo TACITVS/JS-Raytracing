@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Diagnostic Test - JS Raytracing</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #1a1a1a;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            border: 2px solid #ff00ff; /* Bright border to see canvas bounds */
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            max-width: 300px;
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <h4>Diagnostic Mode</h4>
+        <div>Check console for detailed logs</div>
+        <div>Should see magenta for 2 seconds, then rendering</div>
+    </div>
+    <canvas id="webgpu-canvas"></canvas>
+    
+    <script type="importmap">
+    {
+        "imports": {
+            "bitecs": "./node_modules/bitecs/dist/index.mjs",
+            "gl-matrix": "https://esm.sh/gl-matrix@3.4.3",
+            "gltf-loader-ts": "./node_modules/gltf-loader-ts/dist/index.js"
+        }
+    }
+    </script>
+    
+    <script type="module">
+        // First, let's test if we can render anything at all
+        async function simpleWebGPUTest() {
+            console.log("🧪 Running simple WebGPU test...");
+            
+            const canvas = document.getElementById('webgpu-canvas');
+            const adapter = await navigator.gpu.requestAdapter();
+            const device = await adapter.requestDevice();
+            const context = canvas.getContext('webgpu');
+            const format = navigator.gpu.getPreferredCanvasFormat();
+            
+            context.configure({ device, format });
+            
+            // Just clear to blue for 1 second
+            const commandEncoder = device.createCommandEncoder();
+            const renderPass = commandEncoder.beginRenderPass({
+                colorAttachments: [{
+                    view: context.getCurrentTexture().createView(),
+                    clearValue: { r: 0, g: 0, b: 1, a: 1 }, // Blue
+                    loadOp: 'clear',
+                    storeOp: 'store'
+                }]
+            });
+            renderPass.end();
+            device.queue.submit([commandEncoder.finish()]);
+            
+            console.log("🧪 Simple blue clear submitted");
+            
+            // Wait 1 second then try the diagnostic demo
+            setTimeout(async () => {
+                try {
+                    console.log("🚀 Loading DiagnosticDemo...");
+                    const { DiagnosticDemo } = await import('./dist/diagnostic_demo.js');
+                    console.log("✅ DiagnosticDemo loaded, starting...");
+                    new DiagnosticDemo().startup().catch(err => {
+                        console.error("💥 DiagnosticDemo failed:", err);
+                        document.getElementById('info').innerHTML = `
+                            <h4>❌ Error</h4>
+                            <div>${err.message}</div>
+                        `;
+                    });
+                } catch (importError) {
+                    console.error("💥 Failed to import DiagnosticDemo:", importError);
+                    document.getElementById('info').innerHTML = `
+                        <h4>❌ Import Error</h4>
+                        <div>${importError.message}</div>
+                    `;
+                }
+            }, 1000);
+        }
+        
+        simpleWebGPUTest().catch(err => {
+            console.error("💥 Simple test failed:", err);
+            document.getElementById('info').innerHTML = `
+                <h4>❌ Basic WebGPU Test Failed</h4>
+                <div>${err.message}</div>
+            `;
+        });
+    </script>
+</body>
+</html>

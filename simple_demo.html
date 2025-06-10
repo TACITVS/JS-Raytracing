@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Direct Render Test</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0,0,0,0.8);
+            padding: 10px;
+            border-radius: 5px;
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">
+        Simple Direct Rendering Test<br>
+        Should show 3 colored rotating cubes<br>
+        Check console for logs
+    </div>
+    <canvas id="webgpu-canvas"></canvas>
+    
+    <script type="importmap">
+    {
+        "imports": {
+            "bitecs": "./node_modules/bitecs/dist/index.mjs",
+            "gl-matrix": "https://esm.sh/gl-matrix@3.4.3"
+        }
+    }
+    </script>
+    
+    <script type="module">
+        async function startSimpleDemo() {
+            const info = document.getElementById('info');
+            
+            try {
+                info.innerHTML += '<br>Loading SimpleDemo...';
+                
+                const { SimpleDemo } = await import('./dist/simple_demo.js');
+                
+                info.innerHTML += '<br>Starting SimpleDemo...';
+                const demo = new SimpleDemo();
+                await demo.startup();
+                
+                info.innerHTML += '<br>✅ SimpleDemo running!';
+                
+                // Hide info after 3 seconds
+                setTimeout(() => {
+                    info.style.display = 'none';
+                }, 3000);
+                
+            } catch (error) {
+                info.innerHTML += `<br>❌ Error: ${error.message}`;
+                console.error('SimpleDemo error:', error);
+            }
+        }
+        
+        startSimpleDemo();
+    </script>
+</body>
+</html>

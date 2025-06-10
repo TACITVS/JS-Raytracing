@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Direct G-Buffer Test</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0,0,0,0.8);
+            padding: 15px;
+            border-radius: 8px;
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+            z-index: 1000;
+            max-width: 400px;
+        }
+        button {
+            display: block;
+            margin: 5px 0;
+            padding: 8px 12px;
+            background: #333;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover { background: #555; }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <strong>🔧 Direct G-Buffer Write Test</strong><br><br>
+        <div id="logs"></div><br>
+        <button onclick="testDirectGBufferWrite()">Test Direct G-Buffer Write</button>
+        <button onclick="showGBufferResults()">Show Results</button>
+        <button onclick="testRasterSystemPipeline()">Test RasterSystem Pipeline</button>
+    </div>
+    
+    <canvas id="webgpu-canvas"></canvas>
+    
+    <script type="module">
+        const logs = document.getElementById('logs');
+        let renderer, gbuffer;
+        
+        function log(message) {
+            console.log(message);
+            logs.innerHTML += message + '<br>';
+            logs.scrollTop = logs.scrollHeight;
+        }
+        
+        async function init() {
+            try {
+                log("🎯 Initializing direct G-Buffer test...");
+                
+                const { Renderer } = await import('./dist/renderer/Renderer.js');
+                const { GBuffer } = await import('./dist/renderer/GBuffer.js');
+                
+                const canvas = document.getElementById('webgpu-canvas');
+                renderer = await Renderer.getInstance(canvas);
+                gbuffer = new GBuffer(renderer);
+                
+                log("✅ Renderer and G-Buffer ready");
+                
+            } catch (error) {
+                log("❌ Init failed: " + error.message);
+                console.error(error);
+            }
+        }
+        
+        // Test 1: Manually write to G-Buffer with a simple shader
+        window.testDirectGBufferWrite = async function() {
+            try {
+                log("🧪 Test: Direct write to G-Buffer with simple triangle");
+                
+                // Create a simple shader that outputs to 3 targets (like your G-Buffer shader)
+                const simpleGBufferShader = \`
+@vertex
+fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f {
+    var pos = array<vec2f, 3>(
+        vec2f(-0.8, -0.8),
+        vec2f( 0.8, -0.8),
+        vec2f( 0.0,  0.8)
+    );
+    return vec4f(pos[vertexIndex], 0.0, 1.0);
+}
+
+struct GBufferOutput {
+    @location(0) position: vec4f,
+    @location(1) normal: vec4f,
+    @location(2) albedo: vec4f,
+}
+
+@fragment
+fn fs_main() -> GBufferOutput {
+    var output: GBufferOutput;
+    output.position = vec4f(1.0, 0.0, 0.0, 1.0); // Red
+    output.normal = vec4f(0.0, 1.0, 0.0, 1.0);   // Green  
+    output.albedo = vec4f(0.0, 0.0, 1.0, 1.0);   // Blue
+    return output;
+}
+\`;
+                
+                const shaderModule = renderer.device.createShaderModule({ code: simpleGBufferShader });
+                
+                log("✅ Simple G-Buffer shader created");
+                
+                // Get G-Buffer formats from your GBuffer class
+                const { GBUFFER_FORMATS } = await import('./dist/renderer/GBuffer.js');
+                
+                log(\`G-Buffer formats: 
+  Position: \${GBUFFER_FORMATS.position}
+  Normal: \${GBUFFER_FORMATS.normal}  
+  Albedo: \${GBUFFER_FORMATS.albedo}\`);
+                
+                // Create pipeline with exact same configuration as RasterRenderSystem
+                const pipeline = renderer.device.createRenderPipeline({
+                    layout: 'auto',
+                    vertex: {
+                        module: shaderModule,
+                        entryPoint: 'vs_main',
+                    },
+                    fragment: {
+                        module: shaderModule,
+                        entryPoint: 'fs_main',
+                        targets: [
+                            { format: GBUFFER_FORMATS.position },
+                            { format: GBUFFER_FORMATS.normal },
+                            { format: GBUFFER_FORMATS.albedo },
+                        ],
+                    },
+                    primitive: {
+                        topology: 'triangle-list',
+                    },
+                });
+                
+                log("✅ MRT pipeline created successfully");
+                
+                // Get render pass descriptor from your GBuffer
+                const renderPassDescriptor = gbuffer.getRenderPassDescriptor();
+                
+                log(\`Render pass targets: \${renderPassDescriptor.colorAttachments.length}\`);
+                
+                const commandEncoder = renderer.device.createCommandEncoder();
+                const renderPass = commandEncoder.beginRenderPass(renderPassDescriptor);
+                
+                renderPass.setPipeline(pipeline);
+                renderPass.draw(3); // Draw triangle
+                renderPass.end();
+                
+                renderer.device.queue.submit([commandEncoder.finish()]);
+                
+                log("✅ Triangle rendered to G-Buffer!");
+                log("📋 G-Buffer should now contain:");
+                log("  • Position texture: RED triangle");
+                log("  • Normal texture: GREEN triangle");  
+                log("  • Albedo texture: BLUE triangle");
+                
+            } catch (error) {
+                log("❌ Direct G-Buffer write failed: " + error.message);
+                console.error("Direct write error:", error);
+            }
+        };
+        
+        // Test 2: Show G-Buffer results
+        window.showGBufferResults = async function() {
+            try {
+                log("🧪 Showing G-Buffer results...");
+                
+                const displayShader = \`
+@vertex
+fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f {
+    var pos = array<vec2f, 6>(
+        vec2f(-1.0, -1.0), vec2f( 1.0, -1.0), vec2f(-1.0,  1.0),
+        vec2f(-1.0,  1.0), vec2f( 1.0, -1.0), vec2f( 1.0,  1.0)
+    );
+    return vec4f(pos[vertexIndex], 0.0, 1.0);
+}
+
+@group(0) @binding(0) var inputTexture: texture_2d<f32>;
+
+@fragment
+fn fs_main(@builtin(position) fragCoord: vec4f) -> @location(0) vec4f {
+    let coords = vec2i(fragCoord.xy);
+    let color = textureLoad(inputTexture, coords, 0);
+    return vec4f(color.rgb, 1.0);
+}
+\`;
+                
+                const displayModule = renderer.device.createShaderModule({ code: displayShader });
+                const displayPipeline = renderer.device.createRenderPipeline({
+                    layout: 'auto',
+                    vertex: { module: displayModule, entryPoint: 'vs_main' },
+                    fragment: { 
+                        module: displayModule, 
+                        entryPoint: 'fs_main',
+                        targets: [{ format: renderer.format }],
+                    },
+                    primitive: { topology: 'triangle-list' },
+                });
+                
+                // Show albedo buffer (should be blue triangle if direct write worked)
+                const bindGroup = renderer.device.createBindGroup({
+                    layout: displayPipeline.getBindGroupLayout(0),
+                    entries: [{ binding: 0, resource: gbuffer.views.albedo }],
+                });
+                
+                const encoder = renderer.device.createCommandEncoder();
+                const pass = encoder.beginRenderPass({
+                    colorAttachments: [{
+                        view: renderer.context.getCurrentTexture().createView(),
+                        clearValue: { r: 0, g: 0, b: 0, a: 1 },
+                        loadOp: 'clear',
+                        storeOp: 'store'
+                    }]
+                });
+                
+                pass.setPipeline(displayPipeline);
+                pass.setBindGroup(0, bindGroup);
+                pass.draw(6);
+                pass.end();
+                renderer.device.queue.submit([encoder.finish()]);
+                
+                log("✅ Showing G-Buffer albedo texture");
+                log("🔍 If direct write worked, you should see BLUE TRIANGLE");
+                log("🔍 If still black, there's an issue with G-Buffer setup itself");
+                
+            } catch (error) {
+                log("❌ Show results failed: " + error.message);
+                console.error(error);
+            }
+        };
+        
+        // Test 3: Debug RasterSystem pipeline creation
+        window.testRasterSystemPipeline = async function() {
+            try {
+                log("🧪 Testing RasterSystem pipeline creation...");
+                
+                // Load your actual G-Buffer shader
+                const res = await fetch('./dist/shaders/gbuffer.wgsl');
+                const shaderCode = await res.text();
+                const gbufferShaderModule = renderer.device.createShaderModule({ code: shaderCode });
+                
+                log("✅ G-Buffer shader loaded");
+                
+                // Try to create the exact same pipeline as RasterRenderSystem
+                const { GBUFFER_FORMATS } = await import('./dist/renderer/GBuffer.js');
+                
+                try {
+                    const pipeline = renderer.device.createRenderPipeline({
+                        layout: 'auto',
+                        vertex: {
+                            module: gbufferShaderModule,
+                            entryPoint: 'vs_main',
+                            buffers: [{
+                                arrayStride: 6 * 4, // 3 for pos, 3 for normal
+                                attributes: [
+                                    { shaderLocation: 0, offset: 0, format: 'float32x3' }, // pos
+                                    { shaderLocation: 1, offset: 3 * 4, format: 'float32x3' }, // normal
+                                ],
+                            }],
+                        },
+                        fragment: {
+                            module: gbufferShaderModule,
+                            entryPoint: 'fs_main',
+                            targets: [
+                                { format: GBUFFER_FORMATS.position },
+                                { format: GBUFFER_FORMATS.normal },
+                                { format: GBUFFER_FORMATS.albedo },
+                            ],
+                        },
+                        primitive: {
+                            topology: 'triangle-list',
+                            cullMode: 'back',
+                        },
+                        depthStencil: {
+                            depthWriteEnabled: true,
+                            depthCompare: 'less',
+                            format: 'depth24plus',
+                        },
+                    });
+                    
+                    log("✅ RasterSystem pipeline created successfully");
+                    log("💡 Pipeline works - issue must be in rendering execution");
+                    
+                } catch (pipelineError) {
+                    log("❌ RasterSystem pipeline creation failed: " + pipelineError.message);
+                    log("💡 This could be why RasterSystem writes nothing!");
+                    console.error("Pipeline creation error:", pipelineError);
+                }
+                
+            } catch (error) {
+                log("❌ RasterSystem pipeline test failed: " + error.message);
+                console.error(error);
+            }
+        };
+        
+        init();
+    </script>
+</body>
+</html>

@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Simple WebGPU MRT Test</title>
+    <style>
+        canvas { width: 100%; height: 100vh; display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        async function test() {
+            const canvas = document.getElementById('canvas');
+            const adapter = await navigator.gpu.requestAdapter();
+            const device = await adapter.requestDevice();
+            const context = canvas.getContext('webgpu');
+            
+            canvas.width = 800;
+            canvas.height = 600;
+            
+            context.configure({
+                device,
+                format: navigator.gpu.getPreferredCanvasFormat(),
+            });
+            
+            // Test MRT directly
+            const shader = `
+                @vertex fn vs(@builtin(vertex_index) id: u32) -> @builtin(position) vec4f {
+                    var pos = array<vec2f, 3>(vec2f(0,0.5), vec2f(-0.5,-0.5), vec2f(0.5,-0.5));
+                    return vec4f(pos[id], 0, 1);
+                }
+                
+                struct Output {
+                    @location(0) color1: vec4f,
+                    @location(1) color2: vec4f,
+                    @location(2) color3: vec4f,
+                }
+                
+                @fragment fn fs() -> Output {
+                    var out: Output;
+                    out.color1 = vec4f(1, 0, 0, 1);  // Red
+                    out.color2 = vec4f(0, 1, 0, 1);  // Green  
+                    out.color3 = vec4f(0, 0, 1, 1);  // Blue
+                    return out;
+                }
+            `;
+            
+            const module = device.createShaderModule({ code: shader });
+            
+            // Create 3 textures (like your G-Buffer)
+            const tex1 = device.createTexture({
+                size: [800, 600], format: 'rgba8unorm',
+                usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
+            });
+            const tex2 = device.createTexture({
+                size: [800, 600], format: 'rgba8unorm', 
+                usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
+            });
+            const tex3 = device.createTexture({
+                size: [800, 600], format: 'rgba8unorm',
+                usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
+            });
+            
+            const pipeline = device.createRenderPipeline({
+                layout: 'auto',
+                vertex: { module, entryPoint: 'vs' },
+                fragment: { 
+                    module, entryPoint: 'fs',
+                    targets: [
+                        { format: 'rgba8unorm' },
+                        { format: 'rgba8unorm' },
+                        { format: 'rgba8unorm' }
+                    ]
+                },
+                primitive: { topology: 'triangle-list' }
+            });
+            
+            // Render to MRT
+            const encoder = device.createCommandEncoder();
+            const pass = encoder.beginRenderPass({
+                colorAttachments: [
+                    { view: tex1.createView(), loadOp: 'clear', storeOp: 'store' },
+                    { view: tex2.createView(), loadOp: 'clear', storeOp: 'store' },
+                    { view: tex3.createView(), loadOp: 'clear', storeOp: 'store' }
+                ]
+            });
+            pass.setPipeline(pipeline);
+            pass.draw(3);
+            pass.end();
+            device.queue.submit([encoder.finish()]);
+            
+            console.log("MRT render complete - textures should contain triangle data");
+            
+            // Display tex3 (blue triangle)
+            setTimeout(() => {
+                const displayShader = `
+                    @vertex fn vs(@builtin(vertex_index) id: u32) -> @builtin(position) vec4f {
+                        var pos = array<vec2f, 6>(
+                            vec2f(-1,-1), vec2f(1,-1), vec2f(-1,1),
+                            vec2f(-1,1), vec2f(1,-1), vec2f(1,1)
+                        );
+                        return vec4f(pos[id], 0, 1);
+                    }
+                    @group(0) @binding(0) var tex: texture_2d<f32>;
+                    @fragment fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+                        return textureLoad(tex, vec2i(pos.xy), 0);
+                    }
+                `;
+                
+                const displayModule = device.createShaderModule({ code: displayShader });
+                const displayPipeline = device.createRenderPipeline({
+                    layout: 'auto',
+                    vertex: { module: displayModule, entryPoint: 'vs' },
+                    fragment: { module: displayModule, entryPoint: 'fs', targets: [{ format: navigator.gpu.getPreferredCanvasFormat() }] }
+                });
+                
+                const bindGroup = device.createBindGroup({
+                    layout: displayPipeline.getBindGroupLayout(0),
+                    entries: [{ binding: 0, resource: tex3.createView() }]
+                });
+                
+                const encoder2 = device.createCommandEncoder();
+                const pass2 = encoder2.beginRenderPass({
+                    colorAttachments: [{ view: context.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store' }]
+                });
+                pass2.setPipeline(displayPipeline);
+                pass2.setBindGroup(0, bindGroup);
+                pass2.draw(6);
+                pass2.end();
+                device.queue.submit([encoder2.finish()]);
+                
+                console.log("Should see BLUE TRIANGLE if MRT works!");
+            }, 1000);
+        }
+        
+        test().catch(console.error);
+    </script>
+</body>
+</html>

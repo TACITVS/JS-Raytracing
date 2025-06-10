@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>G-Buffer Composition Test</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0,0,0,0.8);
+            padding: 15px;
+            border-radius: 8px;
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+            z-index: 1000;
+            max-width: 400px;
+        }
+        button {
+            display: block;
+            margin: 5px 0;
+            padding: 8px 12px;
+            background: #333;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover { background: #555; }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <strong>🔧 G-Buffer Composition Test</strong><br><br>
+        <div id="logs"></div><br>
+        <button onclick="testFullPipeline()">Test Full G-Buffer Pipeline</button>
+        <button onclick="showGBufferTextures()">Show G-Buffer Textures</button>
+        <button onclick="testComposition()">Test Composition</button>
+    </div>
+    
+    <canvas id="webgpu-canvas"></canvas>
+    
+    <script type="importmap">
+    {
+        "imports": {
+            "bitecs": "./node_modules/bitecs/dist/index.mjs",
+            "gl-matrix": "https://esm.sh/gl-matrix@3.4.3",
+            "gltf-loader-ts": "./node_modules/gltf-loader-ts/dist/index.js"
+        }
+    }
+    </script>
+    
+    <script type="module">
+        const logs = document.getElementById('logs');
+        let renderer, gbuffer;
+        
+        function log(message) {
+            console.log(message);
+            logs.innerHTML += message + '<br>';
+            logs.scrollTop = logs.scrollHeight;
+        }
+        
+        async function init() {
+            try {
+                log("🎯 Initializing G-Buffer composition test...");
+                
+                // Import your systems
+                const { Renderer } = await import('./dist/renderer/Renderer.js');
+                const { GBuffer } = await import('./dist/renderer/GBuffer.js');
+                
+                const canvas = document.getElementById('webgpu-canvas');
+                renderer = await Renderer.getInstance(canvas);
+                gbuffer = new GBuffer(renderer);
+                
+                log("✅ Renderer and G-Buffer initialized");
+                log("G-Buffer textures created:");
+                log(`  Position: ${gbuffer.textures.position.width}x${gbuffer.textures.position.height}`);
+                log(`  Normal: ${gbuffer.textures.normal.width}x${gbuffer.textures.normal.height}`);
+                log(`  Albedo: ${gbuffer.textures.albedo.width}x${gbuffer.textures.albedo.height}`);
+                
+            } catch (error) {
+                log("❌ Init failed: " + error.message);
+                console.error(error);
+            }
+        }
+        
+        // Test 1: Run your actual G-Buffer rendering
+        window.testFullPipeline = async function() {
+            try {
+                log("🧪 Test: Full G-Buffer pipeline");
+                
+                // Import your cube creation and systems
+                const { createCubeGeometry } = await import('./dist/ecs/geometry/GeometryFactory.js');
+                const { RasterRenderSystem } = await import('./dist/ecs/systems/RasterRenderSystem.js');
+                const { createWorld, addEntity } = await import('bitecs');
+                
+                // Create minimal world with cube
+                const world = createWorld();
+                const cubeEntity = addEntity(world);
+                
+                // Add components (simplified)
+                const { Mesh, Transform } = await import('./dist/ecs/components.js');
+                Mesh.indexCount[cubeEntity] = 36; // Cube has 36 indices
+                Transform.position.x[cubeEntity] = 0;
+                Transform.position.y[cubeEntity] = 0;
+                Transform.position.z[cubeEntity] = -5;
+                Transform.rotation.x[cubeEntity] = 0;
+                Transform.rotation.y[cubeEntity] = 0;
+                Transform.rotation.z[cubeEntity] = 0;
+                Transform.rotation.w[cubeEntity] = 1;
+                Transform.scale.x[cubeEntity] = 1;
+                Transform.scale.y[cubeEntity] = 1;
+                Transform.scale.z[cubeEntity] = 1;
+                
+                // Create cube geometry
+                const cubeData = createCubeGeometry();
+                const vertexBuffer = renderer.device.createBuffer({
+                    size: cubeData.vertices.byteLength,
+                    usage: GPUBufferUsage.VERTEX,
+                    mappedAtCreation: true,
+                });
+                new Float32Array(vertexBuffer.getMappedRange()).set(cubeData.vertices);
+                vertexBuffer.unmap();
+                
+                const indexBuffer = renderer.device.createBuffer({
+                    size: cubeData.indices.byteLength,
+                    usage: GPUBufferUsage.INDEX,
+                    mappedAtCreation: true,
+                });
+                new Uint16Array(indexBuffer.getMappedRange()).set(cubeData.indices);
+                indexBuffer.unmap();
+                
+                log("✅ Cube geometry created");
+                
+                // Run RasterRenderSystem (renders to G-Buffer)
+                await RasterRenderSystem(world, renderer, gbuffer, vertexBuffer, indexBuffer);
+                
+                log("✅ RasterRenderSystem completed - cube rendered to G-Buffer");
+                log("📋 G-Buffer now contains cube data in 3 textures");
+                log("❌ BUT you can't see it because it's not composed to canvas!");
+                
+                // Clean up
+                vertexBuffer.destroy();
+                indexBuffer.destroy();
+                
+            } catch (error) {
+                log("❌ Full pipeline test failed: " + error.message);
+                console.error(error);
+            }
+        };
+        
+        // Test 2: Show individual G-Buffer textures
+        window.showGBufferTextures = async function() {
+            try {
+                log("🧪 Test: Display G-Buffer textures individually");
+                
+                // Create composition shader to display textures
+                const compositionShader = `
+@vertex
+fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f {
+    var pos = array<vec2f, 6>(
+        vec2f(-1.0, -1.0), vec2f( 1.0, -1.0), vec2f(-1.0,  1.0),
+        vec2f(-1.0,  1.0), vec2f( 1.0, -1.0), vec2f( 1.0,  1.0)
+    );
+    return vec4f(pos[vertexIndex], 0.0, 1.0);
+}
+
+@group(0) @binding(0) var inputTexture: texture_2d<f32>;
+
+@fragment
+fn fs_main(@builtin(position) fragCoord: vec4f) -> @location(0) vec4f {
+    let coords = vec2i(fragCoord.xy);
+    let color = textureLoad(inputTexture, coords, 0);
+    return vec4f(color.rgb, 1.0);
+}
+`;
+                
+                const shaderModule = renderer.device.createShaderModule({ code: compositionShader });
+                const pipeline = renderer.device.createRenderPipeline({
+                    layout: 'auto',
+                    vertex: { module: shaderModule, entryPoint: 'vs_main' },
+                    fragment: { 
+                        module: shaderModule, 
+                        entryPoint: 'fs_main',
+                        targets: [{ format: renderer.format }],
+                    },
+                    primitive: { topology: 'triangle-list' },
+                });
+                
+                // Display albedo texture (should show colors)
+                const bindGroup = renderer.device.createBindGroup({
+                    layout: pipeline.getBindGroupLayout(0),
+                    entries: [{ binding: 0, resource: gbuffer.views.albedo }],
+                });
+                
+                const encoder = renderer.device.createCommandEncoder();
+                const pass = encoder.beginRenderPass({
+                    colorAttachments: [{
+                        view: renderer.context.getCurrentTexture().createView(),
+                        clearValue: { r: 0, g: 0, b: 0, a: 1 },
+                        loadOp: 'clear',
+                        storeOp: 'store'
+                    }]
+                });
+                
+                pass.setPipeline(pipeline);
+                pass.setBindGroup(0, bindGroup);
+                pass.draw(6);
+                pass.end();
+                renderer.device.queue.submit([encoder.finish()]);
+                
+                log("✅ Showing G-Buffer albedo texture");
+                log("💡 This should show cube colors if G-Buffer rendering worked");
+                
+            } catch (error) {
+                log("❌ G-Buffer texture display failed: " + error.message);
+                console.error(error);
+            }
+        };
+        
+        // Test 3: Simple composition (like a real CompositionSystem)
+        window.testComposition = async function() {
+            try {
+                log("🧪 Test: Simple G-Buffer composition");
+                
+                // Simple composition: just use albedo for now
+                await window.showGBufferTextures();
+                log("✅ Basic composition complete");
+                log("🎯 This is what your hybrid demo is missing!");
+                
+            } catch (error) {
+                log("❌ Composition test failed: " + error.message);
+                console.error(error);
+            }
+        };
+        
+        init();
+    </script>
+</body>
+</html>

@@ -1,45 +1,656 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>JS Raytracing - Hybrid Rendering Demo</title>
-  <style>
-    body, html {
-      margin: 0;
-      padding: 0;
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-      background-color: #1a1a1a;
-    }
-    canvas {
-      display: block;
-      width: 100%;
-      height: 100%;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGPU Hybrid Raytracing Demo</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #16213e 100%);
+            color: #ffffff;
+            font-family: 'Segoe UI', 'Roboto', 'Consolas', monospace;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            overflow-x: hidden;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            animation: fadeInDown 1s ease-out;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            background: linear-gradient(45deg, #00ff88, #00ccff, #ff0088);
+            background-size: 200% 200%;
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: gradientShift 3s ease-in-out infinite alternate;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            color: #aaaaaa;
+            font-size: 1.1rem;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .demo-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 30px;
+            width: 100%;
+            max-width: 1400px;
+        }
+
+        .canvas-container {
+            position: relative;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 
+                0 0 40px rgba(0, 255, 136, 0.3),
+                0 0 80px rgba(0, 204, 255, 0.2),
+                inset 0 0 0 2px rgba(255, 255, 255, 0.1);
+            background: #000;
+            animation: fadeInUp 1s ease-out 0.3s both;
+        }
+
+        #canvas {
+            display: block;
+            background: radial-gradient(circle at center, #111 0%, #000 100%);
+            image-rendering: pixelated;
+            image-rendering: -moz-crisp-edges;
+            image-rendering: crisp-edges;
+        }
+
+        .overlay {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(0, 255, 136, 0.3);
+            border-radius: 8px;
+            padding: 10px;
+            font-size: 0.9rem;
+            font-family: 'Consolas', monospace;
+            min-width: 200px;
+            transition: opacity 0.3s ease;
+        }
+
+        .overlay.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            justify-content: center;
+            animation: fadeInUp 1s ease-out 0.6s both;
+        }
+
+        .control-group {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            min-width: 200px;
+        }
+
+        .control-group h3 {
+            color: #00ff88;
+            margin-bottom: 15px;
+            font-size: 1.1rem;
+            text-align: center;
+        }
+
+        .button-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #00ff88 0%, #00ccff 100%);
+            color: #000;
+            border: none;
+            padding: 12px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-family: inherit;
+            font-weight: 600;
+            font-size: 0.9rem;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 255, 136, 0.4);
+            background: linear-gradient(135deg, #00ccff 0%, #00ff88 100%);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn.danger {
+            background: linear-gradient(135deg, #ff0088 0%, #ff4444 100%);
+        }
+
+        .btn.danger:hover {
+            background: linear-gradient(135deg, #ff4444 0%, #ff0088 100%);
+            box-shadow: 0 5px 15px rgba(255, 0, 136, 0.4);
+        }
+
+        .info-panel {
+            background: rgba(0, 0, 0, 0.6);
+            border: 1px solid rgba(0, 255, 136, 0.3);
+            border-radius: 12px;
+            padding: 25px;
+            max-width: 800px;
+            backdrop-filter: blur(10px);
+            animation: fadeInUp 1s ease-out 0.9s both;
+        }
+
+        .info-panel h3 {
+            color: #00ff88;
+            margin-bottom: 15px;
+            font-size: 1.3rem;
+            text-align: center;
+        }
+
+        .pipeline-steps {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .step {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+        }
+
+        .step h4 {
+            color: #00ccff;
+            margin-bottom: 8px;
+            font-size: 1rem;
+        }
+
+        .step p {
+            color: #cccccc;
+            font-size: 0.9rem;
+            line-height: 1.4;
+        }
+
+        .status-bar {
+            background: rgba(0, 0, 0, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 15px;
+            font-family: 'Consolas', monospace;
+            font-size: 0.9rem;
+        }
+
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            margin: 5px 0;
+            padding: 5px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .status-item:last-child {
+            border-bottom: none;
+        }
+
+        .status-label {
+            color: #aaaaaa;
+        }
+
+        .status-value {
+            color: #00ff88;
+            font-weight: bold;
+        }
+
+        .error {
+            background: rgba(255, 0, 0, 0.2) !important;
+            border-color: #ff0000 !important;
+            color: #ff6666 !important;
+        }
+
+        .loading {
+            text-align: center;
+            color: #00ff88;
+            font-size: 1.1rem;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        .specs {
+            font-size: 0.8rem;
+            color: #888;
+            text-align: center;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* Animations */
+        @keyframes fadeInDown {
+            from {
+                opacity: 0;
+                transform: translateY(-30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes gradientShift {
+            0% {
+                background-position: 0% 50%;
+            }
+            100% {
+                background-position: 100% 50%;
+            }
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.5;
+            }
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+
+            .header h1 {
+                font-size: 2rem;
+            }
+
+            .controls {
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .control-group {
+                width: 100%;
+                max-width: 300px;
+            }
+
+            .button-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .pipeline-steps {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
 </head>
 <body>
-  <canvas id="webgpu-canvas"></canvas>
-  <script type="importmap">
-  {
-    "imports": {
-      "bitecs": "./node_modules/bitecs/dist/index.mjs",
-      "gl-matrix": "https://esm.sh/gl-matrix@3.4.3"
-    }
-  }
-  </script>
-  <script type="module">
-    import { HybridDemo } from './dist/hybrid_demo.js';
-    new HybridDemo().startup().catch(err => {
-        console.error(err);
-        document.body.innerHTML = `<div style="color: white; padding: 20px;">
-            <h2>Error Initializing Demo</h2>
-            <p>${err.message}</p>
-            <p>Please ensure your browser supports WebGPU and it is enabled.</p>
-        </div>`;
-    });
-  </script>
+    <div class="header">
+        <h1>🚀 WebGPU Hybrid Raytracing</h1>
+        <p>Real-time rendering combining rasterization and compute-based raytracing</p>
+    </div>
+
+    <div class="demo-container">
+        <div class="canvas-container">
+            <canvas id="canvas" width="1024" height="768"></canvas>
+            <div id="overlay" class="overlay">
+                <div class="status-item">
+                    <span class="status-label">FPS:</span>
+                    <span id="fps-display" class="status-value">--</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Frame:</span>
+                    <span id="frame-display" class="status-value">--</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Status:</span>
+                    <span id="status-display" class="status-value">Loading...</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <div class="control-group">
+                <h3>🎮 Demo Controls</h3>
+                <div class="button-grid">
+                    <button class="btn" onclick="toggleStats()">Toggle Stats</button>
+                    <button class="btn" onclick="toggleDebug()">Debug Mode</button>
+                    <button class="btn" onclick="captureFrame()">Capture Frame</button>
+                    <button class="btn danger" onclick="resetDemo()">Reset Demo</button>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <h3>⚙️ Rendering</h3>
+                <div class="button-grid">
+                    <button class="btn" onclick="toggleRaytracing()">Toggle RT</button>
+                    <button class="btn" onclick="toggleComposition()">Toggle Comp</button>
+                    <button class="btn" onclick="cycleResolution()">Resolution</button>
+                    <button class="btn" onclick="toggleVSync()">V-Sync</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="info-panel">
+            <h3>🔬 Hybrid Rendering Pipeline</h3>
+            
+            <div class="pipeline-steps">
+                <div class="step">
+                    <h4>🎯 Rasterization</h4>
+                    <p>Generate G-Buffer with geometry data: normals, albedo, depth using traditional rasterization</p>
+                </div>
+                <div class="step">
+                    <h4>✨ Raytracing</h4>
+                    <p>Compute shader-based raytracing for reflections, shadows, and global illumination effects</p>
+                </div>
+                <div class="step">
+                    <h4>🎨 Composition</h4>
+                    <p>Final blend combining rasterized geometry with raytraced lighting and effects</p>
+                </div>
+            </div>
+
+            <div class="status-bar">
+                <div class="status-item">
+                    <span class="status-label">Renderer:</span>
+                    <span class="status-value">WebGPU</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Pipeline:</span>
+                    <span class="status-value">Hybrid Raster + Raytracing</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">BVH:</span>
+                    <span class="status-value">Dynamic Rebuild</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Canvas Size:</span>
+                    <span id="canvas-size" class="status-value">1024x768</span>
+                </div>
+            </div>
+
+            <div class="specs">
+                Requires WebGPU-enabled browser (Chrome 113+, Edge 113+)<br>
+                Best performance with dedicated GPU
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        // Global state
+        let demo = null;
+        let showStats = true;
+        let debugMode = false;
+        let enableRaytracing = true;
+        let enableComposition = true;
+        let currentResolution = 0;
+        let vsyncEnabled = true;
+
+        const resolutions = [
+            { width: 1024, height: 768, label: "1024x768" },
+            { width: 1280, height: 720, label: "720p" },
+            { width: 1920, height: 1080, label: "1080p" },
+            { width: 800, height: 600, label: "800x600" }
+        ];
+
+        // UI Update functions
+        function updateStatus(message, isError = false) {
+            const statusEl = document.getElementById('status-display');
+            statusEl.textContent = message;
+            
+            const overlay = document.getElementById('overlay');
+            if (isError) {
+                overlay.classList.add('error');
+            } else {
+                overlay.classList.remove('error');
+            }
+        }
+
+        function updateFPS(fps) {
+            document.getElementById('fps-display').textContent = fps.toFixed(1);
+        }
+
+        function updateFrame(frame) {
+            document.getElementById('frame-display').textContent = frame;
+        }
+
+        function updateCanvasSize(width, height) {
+            document.getElementById('canvas-size').textContent = `${width}x${height}`;
+        }
+
+        // Demo control functions - Make them global
+        window.toggleStats = () => {
+            showStats = !showStats;
+            const overlay = document.getElementById('overlay');
+            overlay.classList.toggle('hidden', !showStats);
+            console.log('📊 Stats display:', showStats ? 'ON' : 'OFF');
+        };
+
+        window.toggleDebug = () => {
+            debugMode = !debugMode;
+            console.log('🔧 Debug mode:', debugMode ? 'ON' : 'OFF');
+            
+            if (window.demo) {
+                console.log('Demo info:', window.demo.getDiagnosticInfo());
+            }
+        };
+
+        window.captureFrame = () => {
+            console.log('📸 Frame capture requested');
+            const canvas = document.getElementById('canvas');
+            const link = document.createElement('a');
+            link.download = `hybrid-render-${Date.now()}.png`;
+            link.href = canvas.toDataURL();
+            link.click();
+        };
+
+        window.resetDemo = () => {
+            console.log('🔄 Demo reset requested');
+            updateStatus('Resetting...', false);
+            setTimeout(() => location.reload(), 500);
+        };
+
+        window.toggleRaytracing = () => {
+            enableRaytracing = !enableRaytracing;
+            console.log('✨ Raytracing:', enableRaytracing ? 'ON' : 'OFF');
+            updateStatus(`Raytracing: ${enableRaytracing ? 'ON' : 'OFF'}`, false);
+        };
+
+        window.toggleComposition = () => {
+            enableComposition = !enableComposition;
+            console.log('🎨 Composition:', enableComposition ? 'ON' : 'OFF');
+            updateStatus(`Composition: ${enableComposition ? 'ON' : 'OFF'}`, false);
+        };
+
+        window.cycleResolution = () => {
+            currentResolution = (currentResolution + 1) % resolutions.length;
+            const res = resolutions[currentResolution];
+            const canvas = document.getElementById('canvas');
+            
+            canvas.width = res.width;
+            canvas.height = res.height;
+            
+            updateCanvasSize(res.width, res.height);
+            updateStatus(`Resolution: ${res.label}`, false);
+            console.log('📐 Resolution changed to:', res.label);
+        };
+
+        window.toggleVSync = () => {
+            vsyncEnabled = !vsyncEnabled;
+            console.log('⚡ V-Sync:', vsyncEnabled ? 'ON' : 'OFF');
+            updateStatus(`V-Sync: ${vsyncEnabled ? 'ON' : 'OFF'}`, false);
+        };
+
+        // Canvas initialization
+        function initializeCanvas() {
+            const canvas = document.getElementById('canvas');
+            const dpr = window.devicePixelRatio || 1;
+            
+            // Ensure canvas is properly sized
+            const displayWidth = canvas.clientWidth;
+            const displayHeight = canvas.clientHeight;
+            
+            if (canvas.width !== displayWidth * dpr || canvas.height !== displayHeight * dpr) {
+                canvas.width = displayWidth * dpr;
+                canvas.height = displayHeight * dpr;
+            }
+            
+            updateCanvasSize(canvas.width, canvas.height);
+            console.log(`📐 Canvas initialized: ${canvas.width}x${canvas.height} (${displayWidth}x${displayHeight} display)`);
+        }
+
+        // Error handling
+        function showError(error) {
+            console.error('❌ Demo Error:', error);
+            updateStatus(`Error: ${error.message}`, true);
+            
+            // Create detailed error display
+            const errorDiv = document.createElement('div');
+            errorDiv.style.cssText = `
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                background: rgba(255, 0, 0, 0.9);
+                color: white;
+                padding: 20px;
+                border-radius: 8px;
+                font-family: monospace;
+                max-width: 80%;
+                z-index: 10000;
+                box-shadow: 0 0 20px rgba(255, 0, 0, 0.5);
+            `;
+            errorDiv.innerHTML = `
+                <h3>🚨 Demo Error</h3>
+                <p><strong>Message:</strong> ${error.message}</p>
+                <p><strong>Possible causes:</strong></p>
+                <ul>
+                    <li>WebGPU not supported in this browser</li>
+                    <li>GPU drivers need updating</li>
+                    <li>Insufficient GPU memory</li>
+                    <li>Shader compilation error</li>
+                </ul>
+                <button onclick="this.parentElement.remove()" style="margin-top: 10px; padding: 5px 10px;">Close</button>
+            `;
+            document.body.appendChild(errorDiv);
+        }
+
+        // Startup sequence
+        async function startDemo() {
+            try {
+                updateStatus('Initializing WebGPU...', false);
+                await new Promise(resolve => setTimeout(resolve, 100)); // Allow UI update
+
+                updateStatus('Checking WebGPU support...', false);
+                if (!navigator.gpu) {
+                    throw new Error('WebGPU not supported in this browser');
+                }
+
+                updateStatus('Creating canvas context...', false);
+                initializeCanvas();
+
+                updateStatus('Loading demo module...', false);
+                const demoModule = await import('./dist/diagnostic_demo.js');
+
+                updateStatus('Starting demo...', false);
+                const canvas = document.getElementById('canvas');
+                const { DiagnosticDemo } = demoModule;
+                
+                demo = new DiagnosticDemo(canvas);
+                window.demo = demo; // Make globally accessible immediately
+                
+                await demo.startup();
+                updateStatus('Running', false);
+
+                // Start monitoring FPS
+                let frameCount = 0;
+                let lastTime = performance.now();
+                
+                function updateMonitor() {
+                    if (window.demo) {
+                        const info = window.demo.getDiagnosticInfo();
+                        updateFrame(info.frameCount);
+                        
+                        const currentTime = performance.now();
+                        if (currentTime - lastTime >= 1000) {
+                            const fps = frameCount / ((currentTime - lastTime) / 1000);
+                            updateFPS(fps);
+                            frameCount = 0;
+                            lastTime = currentTime;
+                        }
+                        frameCount++;
+                    }
+                    requestAnimationFrame(updateMonitor);
+                }
+                updateMonitor();
+
+            } catch (error) {
+                showError(error);
+            }
+        }
+
+        // Start when DOM is ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', startDemo);
+        } else {
+            startDemo();
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            setTimeout(initializeCanvas, 100);
+        });
+
+        // Handle visibility changes
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                console.log('⏸️ Demo paused (tab hidden)');
+            } else {
+                console.log('▶️ Demo resumed (tab visible)');
+            }
+        });
+    </script>
 </body>
 </html>

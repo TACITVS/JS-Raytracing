@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple G-Buffer Debug</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0,0,0,0.8);
+            padding: 15px;
+            border-radius: 8px;
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+            z-index: 1000;
+            max-width: 300px;
+        }
+        #controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            color: white;
+            background: rgba(0,0,0,0.8);
+            padding: 15px;
+            border-radius: 8px;
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+            z-index: 1000;
+        }
+        button {
+            display: block;
+            margin: 5px 0;
+            padding: 8px 12px;
+            background: #333;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            width: 120px;
+        }
+        button:hover {
+            background: #555;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <strong>🔍 Simple Debug</strong><br><br>
+        <span id="status">Click buttons to test different views</span>
+    </div>
+    
+    <div id="controls">
+        <button onclick="testBasicClear()">1. Basic Clear</button>
+        <button onclick="testColoredQuad()">2. Colored Quad</button>
+        <button onclick="testGBuffer()">3. G-Buffer Raw</button>
+        <button onclick="testCubeGeometry()">4. Cube Geometry</button>
+        <button onclick="testOriginalDemo()">5. Original Demo</button>
+    </div>
+    
+    <canvas id="webgpu-canvas"></canvas>
+    
+    <script type="importmap">
+    {
+        "imports": {
+            "bitecs": "./node_modules/bitecs/dist/index.mjs",
+            "gl-matrix": "https://esm.sh/gl-matrix@3.4.3",
+            "gltf-loader-ts": "./node_modules/gltf-loader-ts/dist/index.js"
+        }
+    }
+    </script>
+    
+    <script type="module">
+        let renderer, gbuffer, world;
+        const status = document.getElementById('status');
+        
+        async function init() {
+            try {
+                // Initialize renderer using your class
+                const { Renderer } = await import('./dist/renderer/Renderer.js');
+                const canvas = document.getElementById('webgpu-canvas');
+                renderer = await Renderer.getInstance(canvas);
+                
+                status.textContent = "✅ Renderer ready. Click buttons to test!";
+                
+            } catch (error) {
+                status.textContent = `❌ Error: ${error.message}`;
+                console.error("Init error:", error);
+            }
+        }
+        
+        // Test 1: Basic clear (should work)
+        window.testBasicClear = function() {
+            status.textContent = "Testing basic clear...";
+            
+            const encoder = renderer.device.createCommandEncoder();
+            const pass = encoder.beginRenderPass({
+                colorAttachments: [{
+                    view: renderer.context.getCurrentTexture().createView(),
+                    clearValue: { r: 1, g: 0, b: 1, a: 1 }, // Magenta
+                    loadOp: 'clear',
+                    storeOp: 'store'
+                }]
+            });
+            pass.end();
+            renderer.device.queue.submit([encoder.finish()]);
+            
+            status.textContent = "✅ Basic clear - should see MAGENTA";
+        };
+        
+        // Test 2: Colored quad (tests basic geometry)
+        window.testColoredQuad = async function() {
+            status.textContent = "Testing colored quad...";
+            
+            try {
+                const vertexShader = `
+                    @vertex
+                    fn main(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f {
+                        var pos = array<vec2f, 6>(
+                            vec2f(-0.5, -0.5),
+                            vec2f( 0.5, -0.5),
+                            vec2f(-0.5,  0.5),
+                            vec2f(-0.5,  0.5),
+                            vec2f( 0.5, -0.5),
+                            vec2f( 0.5,  0.5)
+                        );
+                        return vec4f(pos[vertexIndex], 0.0, 1.0);
+                    }
+                `;
+                
+                const fragmentShader = `
+                    @fragment
+                    fn main(@builtin(position) fragCoord: vec4f) -> @location(0) vec4f {
+                        // Create rainbow pattern
+                        let uv = fragCoord.xy / vec2f(${renderer.canvas.width}.0, ${renderer.canvas.height}.0);
+                        return vec4f(uv.x, uv.y, 0.5, 1.0);
+                    }
+                `;
+                
+                const shaderModule = renderer.device.createShaderModule({
+                    code: vertexShader + fragmentShader
+                });
+                
+                const pipeline = renderer.device.createRenderPipeline({
+                    layout: 'auto',
+                    vertex: {
+                        module: shaderModule,
+                        entryPoint: 'main',
+                    },
+                    fragment: {
+                        module: shaderModule,
+                        entryPoint: 'main',
+                        targets: [{ format: renderer.format }],
+                    },
+                    primitive: {
+                        topology: 'triangle-list',
+                    },
+                });
+                
+                const encoder = renderer.device.createCommandEncoder();
+                const pass = encoder.beginRenderPass({
+                    colorAttachments: [{
+                        view: renderer.context.getCurrentTexture().createView(),
+                        clearValue: { r: 0, g: 0, b: 0, a: 1 },
+                        loadOp: 'clear',
+                        storeOp: 'store'
+                    }]
+                });
+                
+                pass.setPipeline(pipeline);
+                pass.draw(6);
+                pass.end();
+                renderer.device.queue.submit([encoder.finish()]);
+                
+                status.textContent = "✅ Colored quad - should see RAINBOW SQUARE";
+                
+            } catch (error) {
+                status.textContent = `❌ Quad test failed: ${error.message}`;
+                console.error("Quad test error:", error);
+            }
+        };
+        
+        // Test 3: G-Buffer raw output
+        window.testGBuffer = async function() {
+            status.textContent = "Testing G-Buffer system...";
+            
+            try {
+                const { GBuffer } = await import('./dist/renderer/GBuffer.js');
+                gbuffer = new GBuffer(renderer);
+                
+                status.textContent = "✅ G-Buffer created - testing render to G-Buffer...";
+                
+                // Simple test: render to G-Buffer then display it
+                const encoder = renderer.device.createCommandEncoder();
+                
+                // Render to G-Buffer
+                const gbufferPass = encoder.beginRenderPass({
+                    colorAttachments: [{
+                        view: gbuffer.albedoTexture.createView(),
+                        clearValue: { r: 1, g: 0, b: 0, a: 1 }, // Red
+                        loadOp: 'clear',
+                        storeOp: 'store'
+                    }],
+                    depthStencilAttachment: {
+                        view: gbuffer.depthTexture.createView(),
+                        depthClearValue: 1.0,
+                        depthLoadOp: 'clear',
+                        depthStoreOp: 'store'
+                    }
+                });
+                gbufferPass.end();
+                
+                renderer.device.queue.submit([encoder.finish()]);
+                
+                // Now display G-Buffer albedo
+                await displayTexture(gbuffer.albedoTexture, "G-Buffer albedo");
+                
+            } catch (error) {
+                status.textContent = `❌ G-Buffer test failed: ${error.message}`;
+                console.error("G-Buffer test error:", error);
+            }
+        };
+        
+        // Test 4: Cube geometry (your actual cubes)
+        window.testCubeGeometry = async function() {
+            status.textContent = "Testing cube geometry...";
+            
+            try {
+                // Use your SimpleGBufferTest to render cubes
+                const { SimpleGBufferTest } = await import('./dist/simple_gbuffer_test.js');
+                const test = new SimpleGBufferTest();
+                
+                // Override the update loop to just render once
+                const originalUpdate = test.update;
+                test.update = async function() {
+                    try {
+                        // Run transform system
+                        const { TransformSystem } = await import('./dist/ecs/systems/TransformSystem.js');
+                        TransformSystem(this.world);
+
+                        // Run raster system
+                        const { RasterRenderSystem } = await import('./dist/ecs/systems/RasterRenderSystem.js');
+                        await RasterRenderSystem(this.world, this.renderer, this.gbuffer, this.cubeVertexBuffer, this.cubeIndexBuffer);
+                        
+                        // Display G-Buffer instead of clearing to green
+                        await displayTexture(this.gbuffer.albedoTexture, "Cube G-Buffer");
+                        
+                        status.textContent = "✅ Cube test - showing G-Buffer albedo";
+                        
+                    } catch (error) {
+                        console.error("Cube render error:", error);
+                        status.textContent = `❌ Cube render failed: ${error.message}`;
+                    }
+                };
+                
+                await test.startup();
+                
+            } catch (error) {
+                status.textContent = `❌ Cube test failed: ${error.message}`;
+                console.error("Cube test error:", error);
+            }
+        };
+        
+        // Test 5: Original demo
+        window.testOriginalDemo = async function() {
+            status.textContent = "Running original demo...";
+            window.location.href = 'hybrid_demo.html';
+        };
+        
+        // Helper function to display a texture
+        async function displayTexture(texture, name) {
+            const vertexShader = `
+                @vertex
+                fn main(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f {
+                    var pos = array<vec2f, 6>(
+                        vec2f(-1.0, -1.0),
+                        vec2f( 1.0, -1.0),
+                        vec2f(-1.0,  1.0),
+                        vec2f(-1.0,  1.0),
+                        vec2f( 1.0, -1.0),
+                        vec2f( 1.0,  1.0)
+                    );
+                    return vec4f(pos[vertexIndex], 0.0, 1.0);
+                }
+            `;
+            
+            const fragmentShader = `
+                @group(0) @binding(0) var inputTexture: texture_2d<f32>;
+                
+                @fragment
+                fn main(@builtin(position) fragCoord: vec4f) -> @location(0) vec4f {
+                    let coords = vec2i(fragCoord.xy);
+                    let color = textureLoad(inputTexture, coords, 0);
+                    return color;
+                }
+            `;
+            
+            const shaderModule = renderer.device.createShaderModule({
+                code: vertexShader + fragmentShader
+            });
+            
+            const pipeline = renderer.device.createRenderPipeline({
+                layout: 'auto',
+                vertex: {
+                    module: shaderModule,
+                    entryPoint: 'main',
+                },
+                fragment: {
+                    module: shaderModule,
+                    entryPoint: 'main',
+                    targets: [{ format: renderer.format }],
+                },
+                primitive: {
+                    topology: 'triangle-list',
+                },
+            });
+            
+            const bindGroup = renderer.device.createBindGroup({
+                layout: pipeline.getBindGroupLayout(0),
+                entries: [{
+                    binding: 0,
+                    resource: texture.createView(),
+                }],
+            });
+            
+            const encoder = renderer.device.createCommandEncoder();
+            const pass = encoder.beginRenderPass({
+                colorAttachments: [{
+                    view: renderer.context.getCurrentTexture().createView(),
+                    clearValue: { r: 0, g: 0, b: 0, a: 1 },
+                    loadOp: 'clear',
+                    storeOp: 'store'
+                }]
+            });
+            
+            pass.setPipeline(pipeline);
+            pass.setBindGroup(0, bindGroup);
+            pass.draw(6);
+            pass.end();
+            renderer.device.queue.submit([encoder.finish()]);
+            
+            status.textContent = `✅ Displaying: ${name}`;
+        }
+        
+        init();
+    </script>
+</body>
+</html>

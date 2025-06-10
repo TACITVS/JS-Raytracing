@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>G-Buffer Shader Test</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0,0,0,0.8);
+            padding: 15px;
+            border-radius: 8px;
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+            z-index: 1000;
+            max-width: 400px;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+        button {
+            display: block;
+            margin: 5px 0;
+            padding: 8px 12px;
+            background: #333;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover { background: #555; }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <strong>🔧 G-Buffer Shader Test</strong><br><br>
+        <div id="logs"></div><br>
+        <button onclick="testWithUniforms()">Test with Uniforms</button>
+        <button onclick="testWithoutUniforms()">Test without Uniforms</button>
+        <button onclick="testSimpleGeometry()">Test Simple Cube</button>
+    </div>
+    
+    <canvas id="webgpu-canvas"></canvas>
+    
+    <script type="module">
+        import { mat4, vec3 } from 'https://esm.sh/gl-matrix@3.4.3';
+        
+        const logs = document.getElementById('logs');
+        let device, context, canvas, format;
+        let gbufferShaderModule;
+        
+        function log(message) {
+            console.log(message);
+            logs.innerHTML += message + '<br>';
+            logs.scrollTop = logs.scrollHeight;
+        }
+        
+        async function init() {
+            try {
+                log("🎯 Initializing G-Buffer shader test...");
+                
+                canvas = document.getElementById('webgpu-canvas');
+                const adapter = await navigator.gpu.requestAdapter();
+                device = await adapter.requestDevice();
+                context = canvas.getContext('webgpu');
+                
+                canvas.width = canvas.clientWidth;
+                canvas.height = canvas.clientHeight;
+                
+                format = navigator.gpu.getPreferredCanvasFormat();
+                context.configure({
+                    device: device,
+                    format: format,
+                    alphaMode: 'opaque',
+                });
+                
+                // Load G-Buffer shader
+                const response = await fetch('./dist/shaders/gbuffer.wgsl');
+                const shaderCode = await response.text();
+                gbufferShaderModule = device.createShaderModule({ 
+                    code: shaderCode,
+                    label: 'gbuffer-shader'
+                });
+                
+                log("✅ G-Buffer shader loaded and compiled");
+                log("Click buttons to test different scenarios");
+                
+            } catch (error) {
+                log("❌ Init failed: " + error.message);
+                console.error(error);
+            }
+        }
+        
+        // Test 1: Simple geometry without uniforms
+        window.testWithoutUniforms = async function() {
+            try {
+                log("🧪 Test: G-Buffer shader without uniforms");
+                
+                // Create a simple triangle that doesn't need uniforms
+                const vertices = new Float32Array([
+                    // Position (x,y,z), Normal (x,y,z), Color (r,g,b)
+                    -0.5, -0.5, 0.0,   0.0, 0.0, 1.0,   1.0, 0.0, 0.0, // Red vertex
+                     0.5, -0.5, 0.0,   0.0, 0.0, 1.0,   0.0, 1.0, 0.0, // Green vertex  
+                     0.0,  0.5, 0.0,   0.0, 0.0, 1.0,   0.0, 0.0, 1.0, // Blue vertex
+                ]);
+                
+                const vertexBuffer = device.createBuffer({
+                    size: vertices.byteLength,
+                    usage: GPUBufferUsage.VERTEX,
+                    mappedAtCreation: true,
+                });
+                new Float32Array(vertexBuffer.getMappedRange()).set(vertices);
+                vertexBuffer.unmap();
+                
+                // Create a modified shader that doesn't need uniforms
+                const simpleShaderCode = `
+struct VertexInput {
+    @location(0) position: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) color: vec3<f32>,
+}
+
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) color: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+}
+
+@vertex
+fn vs_main(input: VertexInput) -> VertexOutput {
+    var output: VertexOutput;
+    output.position = vec4<f32>(input.position, 1.0);
+    output.color = input.color;
+    output.normal = input.normal;
+    return output;
+}
+
+@fragment
+fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+    return vec4<f32>(input.color, 1.0);
+}
+`;
+                
+                const simpleShader = device.createShaderModule({ code: simpleShaderCode });
+                
+                const pipeline = device.createRenderPipeline({
+                    layout: 'auto',
+                    vertex: {
+                        module: simpleShader,
+                        entryPoint: 'vs_main',
+                        buffers: [{
+                            arrayStride: 9 * 4, // 9 floats * 4 bytes
+                            attributes: [
+                                { format: 'float32x3', offset: 0, shaderLocation: 0 }, // position
+                                { format: 'float32x3', offset: 3 * 4, shaderLocation: 1 }, // normal
+                                { format: 'float32x3', offset: 6 * 4, shaderLocation: 2 }, // color
+                            ],
+                        }],
+                    },
+                    fragment: {
+                        module: simpleShader,
+                        entryPoint: 'fs_main',
+                        targets: [{ format: format }],
+                    },
+                    primitive: {
+                        topology: 'triangle-list',
+                    },
+                });
+                
+                const encoder = device.createCommandEncoder();
+                const pass = encoder.beginRenderPass({
+                    colorAttachments: [{
+                        view: context.getCurrentTexture().createView(),
+                        clearValue: { r: 0, g: 0, b: 0, a: 1 },
+                        loadOp: 'clear',
+                        storeOp: 'store'
+                    }]
+                });
+                
+                pass.setPipeline(pipeline);
+                pass.setVertexBuffer(0, vertexBuffer);
+                pass.draw(3);
+                pass.end();
+                device.queue.submit([encoder.finish()]);
+                
+                log("✅ Should see RGB TRIANGLE (Red-Green-Blue vertices)");
+                
+            } catch (error) {
+                log("❌ Test without uniforms failed: " + error.message);
+                console.error(error);
+            }
+        };
+        
+        // Test 2: With proper uniforms (like your real system)
+        window.testWithUniforms = async function() {
+            try {
+                log("🧪 Test: G-Buffer shader with uniforms");
+                
+                // Create view-projection matrix
+                const aspect = canvas.width / canvas.height;
+                const projMatrix = mat4.create();
+                mat4.perspective(projMatrix, Math.PI / 4, aspect, 0.1, 100.0);
+                
+                const viewMatrix = mat4.create();
+                mat4.lookAt(viewMatrix, [0, 0, 5], [0, 0, 0], [0, 1, 0]);
+                
+                const viewProjMatrix = mat4.create();
+                mat4.multiply(viewProjMatrix, projMatrix, viewMatrix);
+                
+                // Create uniform buffer
+                const uniformData = new Float32Array([
+                    ...viewProjMatrix, // 16 floats for matrix
+                    0, 0, 5, 0, // camera position (4 floats, padded)
+                ]);
+                
+                const uniformBuffer = device.createBuffer({
+                    size: uniformData.byteLength,
+                    usage: GPUBufferUsage.UNIFORM,
+                    mappedAtCreation: true,
+                });
+                new Float32Array(uniformBuffer.getMappedRange()).set(uniformData);
+                uniformBuffer.unmap();
+                
+                // Create cube vertices
+                const cubeVertices = new Float32Array([
+                    // Front face
+                    -1, -1,  1,   0,  0,  1,   1, 0, 0, // position, normal, color
+                     1, -1,  1,   0,  0,  1,   0, 1, 0,
+                     1,  1,  1,   0,  0,  1,   0, 0, 1,
+                    -1,  1,  1,   0,  0,  1,   1, 1, 0,
+                ]);
+                
+                const cubeIndices = new Uint16Array([
+                    0, 1, 2,  2, 3, 0, // front face
+                ]);
+                
+                const vertexBuffer = device.createBuffer({
+                    size: cubeVertices.byteLength,
+                    usage: GPUBufferUsage.VERTEX,
+                    mappedAtCreation: true,
+                });
+                new Float32Array(vertexBuffer.getMappedRange()).set(cubeVertices);
+                vertexBuffer.unmap();
+                
+                const indexBuffer = device.createBuffer({
+                    size: cubeIndices.byteLength,
+                    usage: GPUBufferUsage.INDEX,
+                    mappedAtCreation: true,
+                });
+                new Uint16Array(indexBuffer.getMappedRange()).set(cubeIndices);
+                indexBuffer.unmap();
+                
+                // Try to create pipeline with your actual G-Buffer shader
+                try {
+                    const pipeline = device.createRenderPipeline({
+                        layout: 'auto',
+                        vertex: {
+                            module: gbufferShaderModule,
+                            entryPoint: 'vs_main',
+                            buffers: [{
+                                arrayStride: 9 * 4,
+                                attributes: [
+                                    { format: 'float32x3', offset: 0, shaderLocation: 0 },
+                                    { format: 'float32x3', offset: 3 * 4, shaderLocation: 1 },
+                                    { format: 'float32x3', offset: 6 * 4, shaderLocation: 2 },
+                                ],
+                            }],
+                        },
+                        fragment: {
+                            module: gbufferShaderModule,
+                            entryPoint: 'fs_main',
+                            targets: [{ format: format }],
+                        },
+                        primitive: {
+                            topology: 'triangle-list',
+                        },
+                    });
+                    
+                    log("✅ G-Buffer pipeline created successfully");
+                    
+                    const bindGroup = device.createBindGroup({
+                        layout: pipeline.getBindGroupLayout(0),
+                        entries: [{
+                            binding: 0,
+                            resource: { buffer: uniformBuffer },
+                        }],
+                    });
+                    
+                    const encoder = device.createCommandEncoder();
+                    const pass = encoder.beginRenderPass({
+                        colorAttachments: [{
+                            view: context.getCurrentTexture().createView(),
+                            clearValue: { r: 0, g: 0, b: 0, a: 1 },
+                            loadOp: 'clear',
+                            storeOp: 'store'
+                        }]
+                    });
+                    
+                    pass.setPipeline(pipeline);
+                    pass.setBindGroup(0, bindGroup);
+                    pass.setVertexBuffer(0, vertexBuffer);
+                    pass.setIndexBuffer(indexBuffer, 'uint16');
+                    pass.drawIndexed(6);
+                    pass.end();
+                    device.queue.submit([encoder.finish()]);
+                    
+                    log("✅ Should see COLORED SQUARE using G-Buffer shader");
+                    
+                } catch (pipelineError) {
+                    log("❌ G-Buffer pipeline creation failed: " + pipelineError.message);
+                    console.error("Pipeline error:", pipelineError);
+                }
+                
+            } catch (error) {
+                log("❌ Test with uniforms failed: " + error.message);
+                console.error(error);
+            }
+        };
+        
+        // Test 3: Minimal cube geometry
+        window.testSimpleGeometry = async function() {
+            try {
+                log("🧪 Test: Simple cube geometry");
+                
+                // Import your actual cube creation
+                const { createCubeGeometry } = await import('./dist/ecs/geometry/GeometryFactory.js');
+                const cubeData = createCubeGeometry();
+                
+                log("✅ Cube geometry created:");
+                log("  Vertices: " + cubeData.vertices.length / 9 + " vertices");
+                log("  Indices: " + cubeData.indices.length + " indices");
+                
+                // Use the geometry with a simple shader
+                // ... render with simple shader to see if geometry is correct
+                
+                log("✅ Cube geometry test complete");
+                
+            } catch (error) {
+                log("❌ Simple geometry test failed: " + error.message);
+                console.error(error);
+            }
+        };
+        
+        init();
+    </script>
+</body>
+</html>

@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Renderer Comparison Test</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0,0,0,0.8);
+            padding: 15px;
+            border-radius: 8px;
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+            z-index: 1000;
+            max-width: 400px;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <strong>🔍 Renderer Class vs Basic Setup</strong><br><br>
+        <div id="logs"></div>
+    </div>
+    <canvas id="webgpu-canvas"></canvas>
+    
+    <script type="importmap">
+    {
+        "imports": {
+            "bitecs": "./node_modules/bitecs/dist/index.mjs",
+            "gl-matrix": "https://esm.sh/gl-matrix@3.4.3",
+            "gltf-loader-ts": "./node_modules/gltf-loader-ts/dist/index.js"
+        }
+    }
+    </script>
+    
+    <script type="module">
+        const logs = document.getElementById('logs');
+        
+        function log(message) {
+            console.log(message);
+            logs.innerHTML += message + '<br>';
+            logs.scrollTop = logs.scrollHeight;
+        }
+        
+        async function comparisonTest() {
+            try {
+                const canvas = document.getElementById('webgpu-canvas');
+                
+                // Test 1: Basic Setup (we know this works)
+                log("🟢 Test 1: Basic Setup");
+                const adapter = await navigator.gpu.requestAdapter();
+                const basicDevice = await adapter.requestDevice();
+                const basicContext = canvas.getContext('webgpu');
+                
+                // Important: Set canvas size explicitly
+                const devicePixelRatio = window.devicePixelRatio || 1;
+                canvas.width = canvas.clientWidth * devicePixelRatio;
+                canvas.height = canvas.clientHeight * devicePixelRatio;
+                log(`Canvas size: ${canvas.width} x ${canvas.height}`);
+                
+                const format = navigator.gpu.getPreferredCanvasFormat();
+                basicContext.configure({
+                    device: basicDevice,
+                    format: format,
+                    alphaMode: 'opaque',
+                });
+                
+                // Test basic clear (should work)
+                const encoder1 = basicDevice.createCommandEncoder();
+                const pass1 = encoder1.beginRenderPass({
+                    colorAttachments: [{
+                        view: basicContext.getCurrentTexture().createView(),
+                        clearValue: { r: 0, g: 1, b: 1, a: 1 }, // Cyan
+                        loadOp: 'clear',
+                        storeOp: 'store',
+                    }],
+                });
+                pass1.end();
+                basicDevice.queue.submit([encoder1.finish()]);
+                await basicDevice.queue.onSubmittedWorkDone();
+                log("✅ Basic cyan clear - should see CYAN background");
+                
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                // Test 2: Your Renderer Class Setup
+                log("🔄 Test 2: Your Renderer Class");
+                const { Renderer } = await import('./dist/renderer/Renderer.js');
+                
+                // Create new canvas for your renderer (avoid conflicts)
+                const rendererCanvas = document.createElement('canvas');
+                rendererCanvas.id = 'renderer-canvas';
+                rendererCanvas.style.position = 'absolute';
+                rendererCanvas.style.top = '0';
+                rendererCanvas.style.left = '0';
+                rendererCanvas.style.width = '100%';
+                rendererCanvas.style.height = '100%';
+                rendererCanvas.style.zIndex = '10';
+                
+                // Replace the existing canvas
+                canvas.parentNode.replaceChild(rendererCanvas, canvas);
+                
+                const renderer = await Renderer.getInstance(rendererCanvas);
+                log("✅ Renderer class initialized");
+                
+                // Check renderer configuration
+                log(`Renderer device: ${renderer.device === basicDevice ? 'SAME' : 'DIFFERENT'}`);
+                log(`Canvas size after Renderer: ${rendererCanvas.width} x ${rendererCanvas.height}`);
+                
+                // Test clear with your renderer
+                const encoder2 = renderer.device.createCommandEncoder();
+                const pass2 = encoder2.beginRenderPass({
+                    colorAttachments: [{
+                        view: renderer.context.getCurrentTexture().createView(),
+                        clearValue: { r: 1, g: 0, b: 1, a: 1 }, // Magenta
+                        loadOp: 'clear',
+                        storeOp: 'store',
+                    }],
+                });
+                pass2.end();
+                renderer.device.queue.submit([encoder2.finish()]);
+                await renderer.device.queue.onSubmittedWorkDone();
+                log("✅ Renderer magenta clear - should see MAGENTA background");
+                
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                // Test 3: Canvas Size Investigation
+                log("🔍 Test 3: Canvas Size Check");
+                log(`Canvas client size: ${rendererCanvas.clientWidth} x ${rendererCanvas.clientHeight}`);
+                log(`Canvas actual size: ${rendererCanvas.width} x ${rendererCanvas.height}`);
+                log(`Device pixel ratio: ${devicePixelRatio}`);
+                
+                const computedStyle = window.getComputedStyle(rendererCanvas);
+                log(`Canvas computed width: ${computedStyle.width}`);
+                log(`Canvas computed height: ${computedStyle.height}`);
+                log(`Canvas display: ${computedStyle.display}`);
+                log(`Canvas visibility: ${computedStyle.visibility}`);
+                
+                // Test 4: Force canvas resize and test again
+                log("🔧 Test 4: Force Resize");
+                rendererCanvas.width = 800;
+                rendererCanvas.height = 600;
+                log(`Forced canvas size to: ${rendererCanvas.width} x ${rendererCanvas.height}`);
+                
+                // Reconfigure context after resize
+                renderer.context.configure({
+                    device: renderer.device,
+                    format: format,
+                    alphaMode: 'opaque',
+                });
+                
+                const encoder3 = renderer.device.createCommandEncoder();
+                const pass3 = encoder3.beginRenderPass({
+                    colorAttachments: [{
+                        view: renderer.context.getCurrentTexture().createView(),
+                        clearValue: { r: 0, g: 1, b: 0, a: 1 }, // Green
+                        loadOp: 'clear',
+                        storeOp: 'store',
+                    }],
+                });
+                pass3.end();
+                renderer.device.queue.submit([encoder3.finish()]);
+                await renderer.device.queue.onSubmittedWorkDone();
+                log("✅ Post-resize green clear - should see GREEN background");
+                
+                log("🎉 Test complete! Check background colors:");
+                log("Expected: Cyan → Magenta → Green");
+                
+            } catch (error) {
+                log(`💥 Comparison test failed: ${error.message}`);
+                console.error("Full error:", error);
+            }
+        }
+        
+        comparisonTest();
+    </script>
+</body>
+</html>

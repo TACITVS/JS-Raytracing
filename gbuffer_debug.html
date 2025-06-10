@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>G-Buffer Shader Debug</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0,0,0,0.8);
+            padding: 15px;
+            border-radius: 8px;
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+            z-index: 1000;
+            max-width: 400px;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+        button {
+            display: block;
+            margin: 5px 0;
+            padding: 8px 12px;
+            background: #333;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover { background: #555; }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <strong>🔧 G-Buffer Shader Debug</strong><br><br>
+        <div id="logs"></div><br>
+        <button onclick="testGBufferShaderOutput()">Test G-Buffer Shader Output</button>
+        <button onclick="testCameraPosition()">Test Camera Position</button>
+        <button onclick="testSimplifiedGBuffer()">Test Simplified G-Buffer</button>
+        <button onclick="showGBufferShaderCode()">Show G-Buffer Shader Code</button>
+    </div>
+    
+    <canvas id="webgpu-canvas"></canvas>
+    
+    <script type="importmap">
+    {
+        "imports": {
+            "gl-matrix": "https://esm.sh/gl-matrix@3.4.3"
+        }
+    }
+    </script>
+    
+    <script type="module">
+        import { mat4, vec3 } from 'gl-matrix';
+        
+        const logs = document.getElementById('logs');
+        let renderer, gbufferShader;
+        
+        function log(message) {
+            console.log(message);
+            logs.innerHTML += message + '<br>';
+            logs.scrollTop = logs.scrollHeight;
+        }
+        
+        async function init() {
+            try {
+                log("🎯 Initializing G-Buffer shader debug...");
+                
+                const { Renderer } = await import('./dist/renderer/Renderer.js');
+                const canvas = document.getElementById('webgpu-canvas');
+                renderer = await Renderer.getInstance(canvas);
+                
+                // Load G-Buffer shader
+                const response = await fetch('./dist/shaders/gbuffer.wgsl');
+                const shaderCode = await response.text();
+                gbufferShader = renderer.device.createShaderModule({ code: shaderCode });
+                
+                log("✅ G-Buffer shader loaded");
+                
+            } catch (error) {
+                log("❌ Init failed: " + error.message);
+                console.error(error);
+            }
+        }
+        
+        // Test 1: Test G-Buffer shader output to single target
+        window.testGBufferShaderOutput = async function() {
+            try {
+                log("🧪 Test: G-Buffer shader with single target");
+                
+                // Create simple cube
+                const vertices = new Float32Array([
+                    // Front face - positioned so it's visible to camera
+                    -1, -1, -2,   0,  0,  1,  // Bottom-left
+                     1, -1, -2,   0,  0,  1,  // Bottom-right  
+                     1,  1, -2,   0,  0,  1,  // Top-right
+                    -1,  1, -2,   0,  0,  1,  // Top-left
+                ]);
+                
+                const indices = new Uint16Array([0, 1, 2, 2, 3, 0]);
+                
+                const vertexBuffer = renderer.device.createBuffer({
+                    size: vertices.byteLength,
+                    usage: GPUBufferUsage.VERTEX,
+                    mappedAtCreation: true,
+                });
+                new Float32Array(vertexBuffer.getMappedRange()).set(vertices);
+                vertexBuffer.unmap();
+                
+                const indexBuffer = renderer.device.createBuffer({
+                    size: indices.byteLength,
+                    usage: GPUBufferUsage.INDEX,
+                    mappedAtCreation: true,
+                });
+                new Uint16Array(indexBuffer.getMappedRange()).set(indices);
+                indexBuffer.unmap();
+                
+                // Create uniforms
+                const projMatrix = mat4.create();
+                mat4.perspective(projMatrix, Math.PI / 4, renderer.canvas.width / renderer.canvas.height, 0.1, 100.0);
+                const viewMatrix = mat4.create();
+                mat4.lookAt(viewMatrix, [0, 0, 5], [0, 0, 0], [0, 1, 0]);
+                const viewProjMatrix = mat4.multiply(mat4.create(), projMatrix, viewMatrix);
+                
+                const sceneUniformData = new Float32Array([
+                    ...viewProjMatrix,
+                    0, 0, 5, 0, // camera position
+                ]);
+                
+                const sceneUniformBuffer = renderer.device.createBuffer({
+                    size: sceneUniformData.byteLength,
+                    usage: GPUBufferUsage.UNIFORM,
+                    mappedAtCreation: true,
+                });
+                new Float32Array(sceneUniformBuffer.getMappedRange()).set(sceneUniformData);
+                sceneUniformBuffer.unmap();
+                
+                const modelMatrix = mat4.create();
+                const modelUniformData = new Float32Array([
+                    ...modelMatrix,
+                    1.0, 0.0, 0.0, 1.0, // red color
+                ]);
+                
+                const modelUniformBuffer = renderer.device.createBuffer({
+                    size: modelUniformData.byteLength,
+                    usage: GPUBufferUsage.UNIFORM,
+                    mappedAtCreation: true,
+                });
+                new Float32Array(modelUniformBuffer.getMappedRange()).set(modelUniformData);
+                modelUniformBuffer.unmap();
+                
+                // Test with single render target (direct to canvas)
+                const pipeline = renderer.device.createRenderPipeline({
+                    layout: 'auto',
+                    vertex: {
+                        module: gbufferShader,
+                        entryPoint: 'vs_main',
+                        buffers: [{
+                            arrayStride: 6 * 4,
+                            attributes: [
+                                { shaderLocation: 0, offset: 0, format: 'float32x3' },
+                                { shaderLocation: 1, offset: 3 * 4, format: 'float32x3' },
+                            ],
+                        }],
+                    },
+                    fragment: {
+                        module: gbufferShader,
+                        entryPoint: 'fs_main',
+                        targets: [{ format: renderer.format }], // Single target to canvas
+                    },
+                    primitive: {
+                        topology: 'triangle-list',
+                        cullMode: 'back',
+                    },
+                });
+                
+                const sceneBindGroup = renderer.device.createBindGroup({
+                    layout: pipeline.getBindGroupLayout(0),
+                    entries: [{ binding: 0, resource: { buffer: sceneUniformBuffer } }],
+                });
+                
+                const modelBindGroup = renderer.device.createBindGroup({
+                    layout: pipeline.getBindGroupLayout(1),
+                    entries: [{ binding: 0, resource: { buffer: modelUniformBuffer } }],
+                });
+                
+                const encoder = renderer.device.createCommandEncoder();
+                const pass = encoder.beginRenderPass({
+                    colorAttachments: [{
+                        view: renderer.context.getCurrentTexture().createView(),
+                        clearValue: { r: 0, g: 0, b: 0, a: 1 },
+                        loadOp: 'clear',
+                        storeOp: 'store'
+                    }]
+                });
+                
+                pass.setPipeline(pipeline);
+                pass.setBindGroup(0, sceneBindGroup);
+                pass.setBindGroup(1, modelBindGroup);
+                pass.setVertexBuffer(0, vertexBuffer);
+                pass.setIndexBuffer(indexBuffer, 'uint16');
+                pass.drawIndexed(6);
+                pass.end();
+                renderer.device.queue.submit([encoder.finish()]);
+                
+                log("✅ G-Buffer shader test with single target");
+                log("🔍 If you see a red square, shader works with single target");
+                log("🔍 If black, there's an issue with the shader itself");
+                
+                // Cleanup
+                vertexBuffer.destroy();
+                indexBuffer.destroy();
+                sceneUniformBuffer.destroy();
+                modelUniformBuffer.destroy();
+                
+            } catch (error) {
+                log("❌ G-Buffer shader test failed: " + error.message);
+                console.error(error);
+            }
+        };
+        
+        // Test 2: Test camera positioning
+        window.testCameraPosition = async function() {
+            try {
+                log("🧪 Test: Camera positioning debug");
+                
+                // Create triangle that should definitely be visible
+                const vertices = new Float32Array([
+                    0, 0.5, 0,   0, 0, 1,  // Top
+                   -0.5, -0.5, 0,   0, 0, 1,  // Bottom-left
+                    0.5, -0.5, 0,   0, 0, 1,  // Bottom-right
+                ]);
+                
+                const vertexBuffer = renderer.device.createBuffer({
+                    size: vertices.byteLength,
+                    usage: GPUBufferUsage.VERTEX,
+                    mappedAtCreation: true,
+                });
+                new Float32Array(vertexBuffer.getMappedRange()).set(vertices);
+                vertexBuffer.unmap();
+                
+                // Identity matrices (no transformation)
+                const identityMatrix = new Float32Array([
+                    1, 0, 0, 0,
+                    0, 1, 0, 0,
+                    0, 0, 1, 0,
+                    0, 0, 0, 1,
+                    0, 0, 5, 0, // camera pos
+                ]);
+                
+                const uniformBuffer = renderer.device.createBuffer({
+                    size: identityMatrix.byteLength * 2, // scene + model
+                    usage: GPUBufferUsage.UNIFORM,
+                    mappedAtCreation: true,
+                });
+                const bufferData = new Float32Array(uniformBuffer.getMappedRange());
+                bufferData.set(identityMatrix, 0); // scene uniforms
+                bufferData.set([...identityMatrix.slice(0, 16), 0, 1, 0, 1], 20); // model + green color
+                uniformBuffer.unmap();
+                
+                // Simplified shader for testing
+                const testShader = `
+struct SceneUniforms {
+    view_proj_matrix: mat4x4<f32>,
+    camera_pos: vec3<f32>,
+}
+
+struct ModelUniforms {
+    model_matrix: mat4x4<f32>,
+    color: vec4<f32>,
+}
+
+@group(0) @binding(0) var<uniform> scene: SceneUniforms;
+@group(1) @binding(0) var<uniform> model: ModelUniforms;
+
+struct VertexInput {
+    @location(0) position: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+}
+
+@vertex
+fn vs_main(input: VertexInput) -> @builtin(position) vec4<f32> {
+    return vec4<f32>(input.position, 1.0);
+}
+
+@fragment
+fn fs_main() -> @location(0) vec4<f32> {
+    return vec4<f32>(0.0, 1.0, 0.0, 1.0); // Green
+}
+`;
+                
+                const testShaderModule = renderer.device.createShaderModule({ code: testShader });
+                
+                const pipeline = renderer.device.createRenderPipeline({
+                    layout: 'auto',
+                    vertex: {
+                        module: testShaderModule,
+                        entryPoint: 'vs_main',
+                        buffers: [{
+                            arrayStride: 6 * 4,
+                            attributes: [
+                                { shaderLocation: 0, offset: 0, format: 'float32x3' },
+                                { shaderLocation: 1, offset: 3 * 4, format: 'float32x3' },
+                            ],
+                        }],
+                    },
+                    fragment: {
+                        module: testShaderModule,
+                        entryPoint: 'fs_main',
+                        targets: [{ format: renderer.format }],
+                    },
+                    primitive: {
+                        topology: 'triangle-list',
+                    },
+                });
+                
+                const bindGroup0 = renderer.device.createBindGroup({
+                    layout: pipeline.getBindGroupLayout(0),
+                    entries: [{ binding: 0, resource: { buffer: uniformBuffer, size: 20 * 4 } }],
+                });
+                
+                const bindGroup1 = renderer.device.createBindGroup({
+                    layout: pipeline.getBindGroupLayout(1),
+                    entries: [{ binding: 0, resource: { buffer: uniformBuffer, offset: 20 * 4, size: 20 * 4 } }],
+                });
+                
+                const encoder = renderer.device.createCommandEncoder();
+                const pass = encoder.beginRenderPass({
+                    colorAttachments: [{
+                        view: renderer.context.getCurrentTexture().createView(),
+                        clearValue: { r: 0, g: 0, b: 0, a: 1 },
+                        loadOp: 'clear',
+                        storeOp: 'store'
+                    }]
+                });
+                
+                pass.setPipeline(pipeline);
+                pass.setBindGroup(0, bindGroup0);
+                pass.setBindGroup(1, bindGroup1);
+                pass.setVertexBuffer(0, vertexBuffer);
+                pass.draw(3);
+                pass.end();
+                renderer.device.queue.submit([encoder.finish()]);
+                
+                log("✅ Camera position test with identity matrices");
+                log("🔍 If you see green triangle, camera setup works");
+                
+                vertexBuffer.destroy();
+                uniformBuffer.destroy();
+                
+            } catch (error) {
+                log("❌ Camera position test failed: " + error.message);
+                console.error(error);
+            }
+        };
+        
+        // Test 3: Show G-Buffer shader code
+        window.showGBufferShaderCode = async function() {
+            try {
+                log("🧪 Showing G-Buffer shader code...");
+                
+                const response = await fetch('./dist/shaders/gbuffer.wgsl');
+                const shaderCode = await response.text();
+                
+                const lines = shaderCode.split('\\n');
+                
+                // Look for fragment shader outputs
+                log("📄 G-Buffer shader fragment output:");
+                let inFragment = false;
+                for (let i = 0; i < lines.length; i++) {
+                    const line = lines[i].trim();
+                    if (line.includes('@fragment') || line.includes('fn fs_main')) {
+                        inFragment = true;
+                    }
+                    if (inFragment && (line.includes('@location') || line.includes('return'))) {
+                        log(`  ${i+1}: ${line}`);
+                    }
+                    if (inFragment && line.includes('}') && !line.includes('{')) {
+                        break;
+                    }
+                }
+                
+                log("💡 Check if outputs match your render targets!");
+                
+            } catch (error) {
+                log("❌ Shader code display failed: " + error.message);
+            }
+        };
+        
+        init();
+    </script>
+</body>
+</html>

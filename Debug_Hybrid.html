@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug Hybrid Demo - Render Target Viewer</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            cursor: pointer;
+        }
+        #debug-info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0,0,0,0.8);
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.4;
+            z-index: 1000;
+            border: 1px solid #333;
+        }
+        .mode-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #00ff00;
+            margin-bottom: 8px;
+        }
+        .instructions {
+            color: #ffff00;
+            margin-top: 8px;
+            font-size: 12px;
+        }
+        .mode-list {
+            margin: 8px 0;
+            font-size: 12px;
+            color: #ccc;
+        }
+    </style>
+</head>
+<body>
+    <div id="debug-info">
+        <div class="mode-title">🔍 Debug Mode: Loading...</div>
+        <div class="mode-list">
+            <div>0. G-Buffer Albedo (colors)</div>
+            <div>1. G-Buffer Normals (as colors)</div>
+            <div>2. G-Buffer Position (grayscale)</div>
+            <div>3. Raytracing Output</div>
+        </div>
+        <div class="instructions">
+            Click canvas to cycle modes<br>
+            Auto-cycles every 3 seconds<br>
+            Check console for detailed logs
+        </div>
+    </div>
+    <canvas id="webgpu-canvas"></canvas>
+    
+    <script type="importmap">
+    {
+        "imports": {
+            "bitecs": "./node_modules/bitecs/dist/index.mjs",
+            "gl-matrix": "https://esm.sh/gl-matrix@3.4.3",
+            "gltf-loader-ts": "./node_modules/gltf-loader-ts/dist/index.js"
+        }
+    }
+    </script>
+    
+    <script type="module">
+        async function startDebugDemo() {
+            const debugInfo = document.getElementById('debug-info');
+            
+            try {
+                debugInfo.querySelector('.mode-title').textContent = '🔍 Debug Mode: Loading module...';
+                
+                const { DebugHybridDemo } = await import('./dist/debug_hybrid_demo.js');
+                
+                debugInfo.querySelector('.mode-title').textContent = '🔍 Debug Mode: Starting demo...';
+                const demo = new DebugHybridDemo();
+                await demo.startup();
+                
+                debugInfo.querySelector('.mode-title').textContent = '🔍 Debug Mode: G-Buffer Albedo';
+                
+                // Update debug info as modes change
+                let currentMode = 0;
+                const modeNames = [
+                    'G-Buffer Albedo (colors)',
+                    'G-Buffer Normals (as colors)', 
+                    'G-Buffer Position (grayscale)',
+                    'Raytracing Output'
+                ];
+                
+                // Listen for click events to update UI
+                document.getElementById('webgpu-canvas').addEventListener('click', () => {
+                    currentMode = (currentMode + 1) % 4;
+                    debugInfo.querySelector('.mode-title').textContent = 
+                        `🔍 Debug Mode: ${currentMode}. ${modeNames[currentMode]}`;
+                });
+                
+                // Auto-update for auto-cycle
+                setInterval(() => {
+                    // The demo auto-cycles every 3 seconds, sync our UI
+                    currentMode = Math.floor((performance.now() / 3000) % 4);
+                    debugInfo.querySelector('.mode-title').textContent = 
+                        `🔍 Debug Mode: ${currentMode}. ${modeNames[currentMode]}`;
+                }, 100);
+                
+                // Hide debug info after 10 seconds
+                setTimeout(() => {
+                    debugInfo.style.opacity = '0.3';
+                }, 10000);
+                
+            } catch (error) {
+                debugInfo.querySelector('.mode-title').textContent = '❌ Error Loading Demo';
+                debugInfo.innerHTML += `<div style="color: #ff6666; margin-top: 10px;">${error.message}</div>`;
+                console.error('DebugHybridDemo error:', error);
+            }
+        }
+        
+        startDebugDemo();
+    </script>
+</body>
+</html>

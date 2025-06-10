@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Basic WebGPU Test</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0,0,0,0.8);
+            padding: 15px;
+            border-radius: 8px;
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <strong>🔧 Basic WebGPU Test</strong><br><br>
+        Testing if WebGPU can clear canvas to colors.<br><br>
+        <span id="status">Initializing...</span>
+    </div>
+    <canvas id="webgpu-canvas"></canvas>
+    
+    <script type="module">
+        const info = document.getElementById('info');
+        const status = document.getElementById('status');
+        
+        async function basicWebGPUTest() {
+            try {
+                status.textContent = "Checking WebGPU support...";
+                
+                if (!navigator.gpu) {
+                    throw new Error("WebGPU not supported");
+                }
+                
+                const adapter = await navigator.gpu.requestAdapter();
+                if (!adapter) {
+                    throw new Error("No WebGPU adapter found");
+                }
+                
+                const device = await adapter.requestDevice();
+                status.textContent = "WebGPU device acquired...";
+                
+                const canvas = document.getElementById('webgpu-canvas');
+                const context = canvas.getContext('webgpu');
+                if (!context) {
+                    throw new Error("Failed to get WebGPU context");
+                }
+                
+                // Set canvas size
+                const devicePixelRatio = window.devicePixelRatio || 1;
+                canvas.width = canvas.clientWidth * devicePixelRatio;
+                canvas.height = canvas.clientHeight * devicePixelRatio;
+                
+                // Configure context
+                const format = navigator.gpu.getPreferredCanvasFormat();
+                context.configure({
+                    device: device,
+                    format: format,
+                    alphaMode: 'opaque',
+                });
+                
+                status.textContent = "WebGPU context configured...";
+                
+                let frameCount = 0;
+                
+                function render() {
+                    frameCount++;
+                    
+                    // Cycle through colors every 60 frames
+                    let color;
+                    const cycle = Math.floor(frameCount / 60) % 4;
+                    switch(cycle) {
+                        case 0: color = { r: 1, g: 0, b: 0, a: 1 }; break; // Red
+                        case 1: color = { r: 0, g: 1, b: 0, a: 1 }; break; // Green  
+                        case 2: color = { r: 0, g: 0, b: 1, a: 1 }; break; // Blue
+                        case 3: color = { r: 1, g: 1, b: 0, a: 1 }; break; // Yellow
+                    }
+                    
+                    // Update status
+                    if (frameCount % 60 === 1) {
+                        const colors = ['🔴 Red', '🟢 Green', '🔵 Blue', '🟡 Yellow'];
+                        status.textContent = `Frame ${frameCount} - ${colors[cycle]}`;
+                    }
+                    
+                    try {
+                        const commandEncoder = device.createCommandEncoder();
+                        const textureView = context.getCurrentTexture().createView();
+                        
+                        const renderPass = commandEncoder.beginRenderPass({
+                            colorAttachments: [{
+                                view: textureView,
+                                clearValue: color,
+                                loadOp: 'clear',
+                                storeOp: 'store',
+                            }],
+                        });
+                        
+                        renderPass.end();
+                        device.queue.submit([commandEncoder.finish()]);
+                        
+                    } catch (renderError) {
+                        console.error("Render error:", renderError);
+                        status.textContent = `❌ Render error: ${renderError.message}`;
+                        return;
+                    }
+                    
+                    requestAnimationFrame(render);
+                }
+                
+                status.textContent = "✅ Starting color cycle...";
+                render();
+                
+            } catch (error) {
+                console.error("WebGPU test error:", error);
+                status.textContent = `❌ Error: ${error.message}`;
+            }
+        }
+        
+        basicWebGPUTest();
+    </script>
+</body>
+</html>

@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Brave WebGPU Test</title>
+    <style>
+        body { 
+            margin: 0; padding: 20px; background: #222; color: white; 
+            font-family: Arial, sans-serif;
+        }
+        canvas { 
+            border: 2px solid #fff; background: #000; 
+            width: 600px; height: 400px; display: block; margin: 20px 0;
+        }
+        .status { 
+            padding: 15px; background: #333; border-radius: 5px; 
+            margin: 10px 0; border-left: 4px solid #0f0;
+        }
+        .error { border-left-color: #f00; }
+        .warning { border-left-color: #ff0; }
+    </style>
+</head>
+<body>
+    <h1>🛡️ Brave WebGPU Compatibility Test</h1>
+    
+    <div id="browser-info" class="status">
+        <strong>Browser:</strong> <span id="user-agent"></span>
+    </div>
+    
+    <div id="webgpu-status" class="status">
+        <strong>WebGPU Status:</strong> <span id="webgpu-result">Checking...</span>
+    </div>
+    
+    <div id="flags-info" class="status warning">
+        <strong>If WebGPU fails:</strong><br>
+        1. Go to <code>brave://flags/</code><br>
+        2. Enable <code>#enable-unsafe-webgpu</code><br>
+        3. Restart Brave<br>
+        4. Turn off Brave Shields for this page (🛡️ icon)
+    </div>
+    
+    <canvas id="canvas" width="600" height="400"></canvas>
+    
+    <div id="render-status" class="status">
+        <strong>Render Test:</strong> <span id="render-result">Waiting for WebGPU...</span>
+    </div>
+
+    <script>
+        // Display browser info
+        document.getElementById('user-agent').textContent = navigator.userAgent;
+        
+        async function testWebGPU() {
+            const webgpuResult = document.getElementById('webgpu-result');
+            const renderResult = document.getElementById('render-result');
+            const canvas = document.getElementById('canvas');
+            
+            try {
+                // Test 1: WebGPU API availability
+                if (!navigator.gpu) {
+                    throw new Error('navigator.gpu is not available. WebGPU not supported or not enabled.');
+                }
+                webgpuResult.textContent = '✅ navigator.gpu available';
+                
+                // Test 2: Request adapter
+                webgpuResult.textContent = '⏳ Requesting adapter...';
+                const adapter = await navigator.gpu.requestAdapter();
+                if (!adapter) {
+                    throw new Error('No WebGPU adapter found. Check brave://flags/#enable-unsafe-webgpu');
+                }
+                webgpuResult.textContent = '✅ Adapter obtained';
+                
+                // Test 3: Request device
+                webgpuResult.textContent = '⏳ Requesting device...';
+                const device = await adapter.requestDevice();
+                webgpuResult.textContent = '✅ Device created';
+                
+                // Test 4: Get context
+                renderResult.textContent = '⏳ Getting WebGPU context...';
+                const context = canvas.getContext('webgpu');
+                if (!context) {
+                    throw new Error('Failed to get WebGPU context from canvas');
+                }
+                
+                // Test 5: Configure context
+                renderResult.textContent = '⏳ Configuring context...';
+                const format = navigator.gpu.getPreferredCanvasFormat();
+                context.configure({ device, format });
+                
+                renderResult.textContent = '⏳ Creating test shader...';
+                
+                // Test 6: Create and run simple render test
+                const shader = device.createShaderModule({
+                    code: `
+                        @vertex
+                        fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
+                            let pos = array<vec2<f32>, 3>(
+                                vec2<f32>( 0.0,  0.7),
+                                vec2<f32>(-0.7, -0.7),
+                                vec2<f32>( 0.7, -0.7)
+                            );
+                            return vec4<f32>(pos[i], 0.0, 1.0);
+                        }
+                        
+                        @fragment
+                        fn fs() -> @location(0) vec4<f32> {
+                            return vec4<f32>(0.0, 1.0, 0.0, 1.0);
+                        }
+                    `
+                });
+                
+                const pipeline = device.createRenderPipeline({
+                    layout: 'auto',
+                    vertex: { module: shader, entryPoint: 'vs' },
+                    fragment: { module: shader, entryPoint: 'fs', targets: [{ format }] },
+                    primitive: { topology: 'triangle-list' }
+                });
+                
+                renderResult.textContent = '⏳ Rendering test triangle...';
+                
+                // Render a green triangle
+                const encoder = device.createCommandEncoder();
+                const pass = encoder.beginRenderPass({
+                    colorAttachments: [{
+                        view: context.getCurrentTexture().createView(),
+                        clearValue: { r: 0.1, g: 0.1, b: 0.5, a: 1.0 },
+                        loadOp: 'clear',
+                        storeOp: 'store'
+                    }]
+                });
+                
+                pass.setPipeline(pipeline);
+                pass.draw(3);
+                pass.end();
+                device.queue.submit([encoder.finish()]);
+                
+                renderResult.textContent = '✅ SUCCESS! Green triangle rendered. WebGPU is working in Brave!';
+                renderResult.parentElement.style.borderLeftColor = '#0f0';
+                
+                // Also test adapter info
+                const info = await adapter.requestAdapterInfo();
+                console.log('WebGPU Adapter Info:', info);
+                
+            } catch (error) {
+                console.error('WebGPU test failed:', error);
+                
+                if (error.message.includes('adapter')) {
+                    webgpuResult.textContent = `❌ ${error.message}`;
+                    webgpuResult.parentElement.className = 'status error';
+                } else {
+                    renderResult.textContent = `❌ ${error.message}`;
+                    renderResult.parentElement.className = 'status error';
+                }
+                
+                // Show detailed debugging info
+                const debugInfo = document.createElement('div');
+                debugInfo.className = 'status error';
+                debugInfo.innerHTML = `
+                    <strong>Debug Info:</strong><br>
+                    <code>navigator.gpu:</code> ${!!navigator.gpu}<br>
+                    <code>Error:</code> ${error.message}<br>
+                    <code>Stack:</code> <pre style="font-size: 10px; margin: 5px 0;">${error.stack}</pre>
+                `;
+                document.body.appendChild(debugInfo);
+            }
+        }
+        
+        // Test immediately
+        testWebGPU();
+    </script>
+</body>
+</html>

@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Shader Test</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0,0,0,0.8);
+            padding: 15px;
+            border-radius: 8px;
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+            z-index: 1000;
+            max-width: 400px;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <strong>🔧 Simple Shader Test</strong><br><br>
+        <div id="logs"></div>
+    </div>
+    
+    <canvas id="webgpu-canvas"></canvas>
+    
+    <script type="module">
+        const logs = document.getElementById('logs');
+        
+        function log(message) {
+            console.log(message);
+            logs.innerHTML += message + '<br>';
+            logs.scrollTop = logs.scrollHeight;
+        }
+        
+        async function simpleShaderTest() {
+            try {
+                log("🎯 Starting simple shader test...");
+                
+                // Basic WebGPU setup
+                const canvas = document.getElementById('webgpu-canvas');
+                const adapter = await navigator.gpu.requestAdapter();
+                const device = await adapter.requestDevice();
+                const context = canvas.getContext('webgpu');
+                
+                canvas.width = canvas.clientWidth;
+                canvas.height = canvas.clientHeight;
+                log("Canvas: " + canvas.width + " x " + canvas.height);
+                
+                const format = navigator.gpu.getPreferredCanvasFormat();
+                context.configure({
+                    device: device,
+                    format: format,
+                    alphaMode: 'opaque',
+                });
+                
+                // Test 1: Basic triangle with simple shader
+                log("🧪 Test 1: Basic triangle");
+                
+                const vertexShaderCode = [
+                    "@vertex",
+                    "fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f {",
+                    "    var pos = array<vec2f, 3>(",
+                    "        vec2f(-0.8, -0.8),",
+                    "        vec2f( 0.8, -0.8),",
+                    "        vec2f( 0.0,  0.8)",
+                    "    );",
+                    "    return vec4f(pos[vertexIndex], 0.0, 1.0);",
+                    "}"
+                ].join('\n');
+                
+                const fragmentShaderCode = [
+                    "@fragment", 
+                    "fn fs_main() -> @location(0) vec4f {",
+                    "    return vec4f(1.0, 0.0, 0.0, 1.0);",
+                    "}"
+                ].join('\n');
+                
+                const fullShaderCode = vertexShaderCode + '\n\n' + fragmentShaderCode;
+                
+                log("📝 Compiling shader...");
+                console.log("Shader code:", fullShaderCode);
+                
+                const shaderModule = device.createShaderModule({ 
+                    code: fullShaderCode,
+                    label: 'test-shader'
+                });
+                log("✅ Shader compiled successfully");
+                
+                log("🔧 Creating pipeline...");
+                const pipeline = device.createRenderPipeline({
+                    layout: 'auto',
+                    vertex: {
+                        module: shaderModule,
+                        entryPoint: 'vs_main',
+                    },
+                    fragment: {
+                        module: shaderModule,
+                        entryPoint: 'fs_main',
+                        targets: [{ format: format }],
+                    },
+                    primitive: {
+                        topology: 'triangle-list',
+                    },
+                    label: 'test-pipeline'
+                });
+                log("✅ Pipeline created successfully");
+                
+                log("🎨 Rendering...");
+                const encoder = device.createCommandEncoder({ label: 'test-encoder' });
+                const pass = encoder.beginRenderPass({
+                    colorAttachments: [{
+                        view: context.getCurrentTexture().createView(),
+                        clearValue: { r: 0, g: 0, b: 0, a: 1 },
+                        loadOp: 'clear',
+                        storeOp: 'store'
+                    }],
+                    label: 'test-pass'
+                });
+                
+                pass.setPipeline(pipeline);
+                pass.draw(3);
+                pass.end();
+                
+                const commandBuffer = encoder.finish({ label: 'test-commands' });
+                device.queue.submit([commandBuffer]);
+                
+                log("✅ RED TRIANGLE should appear!");
+                
+                // Wait a bit, then test loading your shader
+                setTimeout(async () => {
+                    await testGBufferShader(device);
+                }, 2000);
+                
+            } catch (error) {
+                log("❌ Test failed: " + error.message);
+                console.error("Full error:", error);
+            }
+        }
+        
+        async function testGBufferShader(device) {
+            try {
+                log("🧪 Test 2: Loading your G-Buffer shader");
+                
+                const response = await fetch('./dist/shaders/gbuffer.wgsl');
+                if (!response.ok) {
+                    throw new Error("Failed to load gbuffer.wgsl: " + response.status);
+                }
+                
+                const shaderCode = await response.text();
+                log("✅ G-Buffer shader loaded (" + shaderCode.length + " chars)");
+                
+                // Show first few lines
+                const lines = shaderCode.split('\n').slice(0, 10);
+                log("📄 First 10 lines of gbuffer.wgsl:");
+                lines.forEach((line, i) => {
+                    const lineNum = (i + 1).toString().padStart(2, ' ');
+                    log("  " + lineNum + ": " + line);
+                });
+                
+                log("🔧 Attempting to compile G-Buffer shader...");
+                const gbufferModule = device.createShaderModule({ 
+                    code: shaderCode,
+                    label: 'gbuffer-shader'
+                });
+                log("✅ G-Buffer shader compiled successfully!");
+                
+            } catch (error) {
+                log("❌ G-Buffer shader failed: " + error.message);
+                console.error("G-Buffer shader error:", error);
+                
+                // If shader failed, check if file exists
+                log("🔍 Checking if shader file exists...");
+                try {
+                    const response = await fetch('./dist/shaders/');
+                    log("Shader directory response: " + response.status);
+                } catch (dirError) {
+                    log("❌ Cannot access shader directory: " + dirError.message);
+                }
+            }
+        }
+        
+        simpleShaderTest();
+    </script>
+</body>
+</html>

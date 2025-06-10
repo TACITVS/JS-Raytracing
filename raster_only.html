@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Raster-Only Test</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0,0,0,0.8);
+            padding: 15px;
+            border-radius: 8px;
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+            z-index: 1000;
+            max-width: 300px;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <strong>🎯 Raster-Only Test</strong><br><br>
+        This bypasses raytracing and composition.<br>
+        Shows G-Buffer albedo directly.<br><br>
+        <strong>Expected:</strong><br>
+        • Colored cubes = G-Buffer works<br>
+        • Checkerboard = G-Buffer empty<br>
+        • Purple = No content rendered<br><br>
+        Check console for logs
+    </div>
+    <canvas id="webgpu-canvas"></canvas>
+    
+    <script type="importmap">
+    {
+        "imports": {
+            "bitecs": "./node_modules/bitecs/dist/index.mjs",
+            "gl-matrix": "https://esm.sh/gl-matrix@3.4.3",
+            "gltf-loader-ts": "./node_modules/gltf-loader-ts/dist/index.js"
+        }
+    }
+    </script>
+    
+    <script type="module">
+        async function startRasterOnlyDemo() {
+            const info = document.getElementById('info');
+            
+            try {
+                info.innerHTML += '<br>Loading RasterOnlyDemo...';
+                
+                const { RasterOnlyDemo } = await import('./dist/raster_only_demo.js');
+                
+                info.innerHTML += '<br>Starting demo...';
+                const demo = new RasterOnlyDemo();
+                await demo.startup();
+                
+                info.innerHTML += '<br>✅ Demo running!';
+                
+                // Hide info after 5 seconds
+                setTimeout(() => {
+                    info.style.opacity = '0.2';
+                }, 5000);
+                
+            } catch (error) {
+                info.innerHTML += `<br>❌ Error: ${error.message}`;
+                console.error('RasterOnlyDemo error:', error);
+            }
+        }
+        
+        startRasterOnlyDemo();
+    </script>
+</body>
+</html>

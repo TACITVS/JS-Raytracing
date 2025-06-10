@@ -1,10 +1,10 @@
 // File: src/Engine.ts
-// Tag: ENGINE_CLASS_FIXED
-// Description: Corrects the import path for TransformSystem to match the new file structure.
+// Path: src/Engine.ts
+// Description: Enhanced Engine class that leverages the new ResourceManager and capability detection.
+// Provides better debugging information and prepares the foundation for optimized rendering systems.
 
 import { createWorld, IWorld } from 'bitecs';
 import { Renderer } from './renderer/Renderer.js';
-// **FIXED**: Corrected the import path to point to the new location of TransformSystem.
 import { TransformSystem } from './ecs/systems/TransformSystem.js';
 
 export class Engine {
@@ -19,12 +19,32 @@ export class Engine {
 
     /**
      * Initializes the engine, sets up the renderer, and starts the main loop.
+     * Now includes enhanced capability detection and resource management logging.
      */
     async startup() {
         const canvas = document.getElementById('webgpu-canvas') as HTMLCanvasElement;
         if (!canvas) throw new Error('Canvas element with ID "webgpu-canvas" not found.');
 
+        // Initialize the enhanced renderer
         this.renderer = await Renderer.getInstance(canvas);
+
+        // Enhanced logging for debugging WebGPU setup
+        console.log('=== Engine Initialization Complete ===');
+        console.log('Canvas size:', this.renderer.canvasSize);
+        console.log('Preferred format:', this.renderer.format);
+        
+        // Log WebGPU capabilities for debugging browser/GPU issues
+        const debugInfo = this.renderer.getDebugInfo();
+        console.log('WebGPU Capabilities:', {
+            timestamps: debugInfo.capabilities.supportsTimestamps,
+            f16: debugInfo.capabilities.supportsF16,
+            maxWorkgroupInvocations: debugInfo.capabilities.computeWorkgroupLimits.maxInvocations,
+            maxStorageBufferSize: debugInfo.capabilities.storageBufferLimits.maxBindingSize
+        });
+
+        // Log initial resource state
+        console.log('Initial resource stats:', debugInfo.resourceStats);
+        console.log('=====================================');
 
         // TODO: Initialize entities and other systems here.
         // For example:
@@ -38,6 +58,7 @@ export class Engine {
 
     /**
      * The main application loop, called every frame.
+     * Enhanced with performance monitoring and resource tracking.
      */
     private update(now: number) {
         const deltaTime = (now - this.lastTime) / 1000.0;
@@ -56,6 +77,40 @@ export class Engine {
         // RaytracingSystem(this.world, this.renderer); // (when implemented)
         // PostProcessingSystem(this.renderer); // (when implemented)
 
+        // Optional: Log resource stats periodically for debugging
+        if (Math.floor(now / 1000) % 10 === 0 && Math.floor(now) % 1000 < 16) {
+            const stats = this.renderer.resources.getResourceStats();
+            if (stats.buffers > 0 || stats.textures > 0) {
+                console.log('Resource usage:', stats);
+            }
+        }
+
         requestAnimationFrame(this.update.bind(this));
+    }
+
+    /**
+     * Clean up resources when the engine is destroyed
+     */
+    destroy(): void {
+        console.log('Engine cleanup started...');
+        if (this.renderer) {
+            const finalStats = this.renderer.resources.getResourceStats();
+            console.log('Final resource stats before cleanup:', finalStats);
+            this.renderer.destroy();
+        }
+        console.log('Engine cleanup complete.');
+    }
+
+    /**
+     * Get current engine statistics for debugging
+     */
+    getStats(): {
+        frameTime: number;
+        renderer: ReturnType<Renderer['getDebugInfo']>;
+    } {
+        return {
+            frameTime: this.lastTime,
+            renderer: this.renderer.getDebugInfo()
+        };
     }
 }

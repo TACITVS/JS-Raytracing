@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Compute Shader Test</title>
+    <style>
+        body { margin: 0; padding: 20px; background: #222; color: white; font-family: Arial; }
+        canvas { border: 2px solid #fff; display: block; margin: 20px 0; }
+        .status { padding: 10px; background: #333; margin: 10px 0; border-radius: 5px; }
+        .error { background: #633; }
+        .success { background: #363; }
+    </style>
+</head>
+<body>
+    <h1>🖥️ Compute Shader Test</h1>
+    <div id="status" class="status">Testing...</div>
+    <canvas id="canvas" width="512" height="512"></canvas>
+    
+    <script>
+        async function testComputeShader() {
+            const status = document.getElementById('status');
+            const canvas = document.getElementById('canvas');
+            
+            try {
+                status.textContent = 'Initializing WebGPU...';
+                
+                const adapter = await navigator.gpu.requestAdapter();
+                const device = await adapter.requestDevice();
+                const context = canvas.getContext('webgpu');
+                const format = navigator.gpu.getPreferredCanvasFormat();
+                
+                context.configure({ device, format });
+                
+                status.textContent = 'Creating compute shader...';
+                
+                // Simple compute shader that generates a gradient
+                const computeShaderCode = `
+                    @group(0) @binding(0) var output_texture: texture_storage_2d<rgba8unorm, write>;
+                    
+                    @compute @workgroup_size(8, 8, 1)
+                    fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+                        let dims = textureDimensions(output_texture);
+                        
+                        if (global_id.x >= dims.x || global_id.y >= dims.y) {
+                            return;
+                        }
+                        
+                        let uv = vec2<f32>(f32(global_id.x), f32(global_id.y)) / vec2<f32>(f32(dims.x), f32(dims.y));
+                        
+                        // Generate a simple gradient
+                        let color = vec4<f32>(uv.x, uv.y, 0.5, 1.0);
+                        
+                        textureStore(output_texture, global_id.xy, color);
+                    }
+                `;
+                
+                const computeModule = device.createShaderModule({ code: computeShaderCode });
+                
+                status.textContent = 'Creating compute pipeline...';
+                
+                const computePipeline = device.createComputePipeline({
+                    layout: 'auto',
+                    compute: { module: computeModule, entryPoint: 'main' }
+                });
+                
+                status.textContent = 'Creating storage texture...';
+                
+                // Create storage texture for compute output
+                const storageTexture = device.createTexture({
+                    size: [canvas.width, canvas.height],
+                    format: 'rgba8unorm',
+                    usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING
+                });
+                
+                const computeBindGroup = device.createBindGroup({
+                    layout: computePipeline.getBindGroupLayout(0),
+                    entries: [
+                        { binding: 0, resource: storageTexture.createView() }
+                    ]
+                });
+                
+                status.textContent = 'Creating display pipeline...';
+                
+                // Create pipeline to display the compute result
+                const displayShaderCode = `
+                    @group(0) @binding(0) var tex_sampler: sampler;
+                    @group(0) @binding(1) var tex: texture_2d<f32>;
+                    
+                    struct VertexOutput {
+                        @builtin(position) position: vec4<f32>,
+                        @location(0) uv: vec2<f32>,
+                    };
+                    
+                    @vertex
+                    fn vs(@builtin(vertex_index) index: u32) -> VertexOutput {
+                        var output: VertexOutput;
+                        let x = f32(index % 2u) * 2.0 - 1.0;
+                        let y = f32(index / 2u) * 2.0 - 1.0;
+                        output.position = vec4<f32>(x, -y, 0.0, 1.0);
+                        output.uv = vec2<f32>(f32(index % 2u), f32(index / 2u));
+                        return output;
+                    }
+                    
+                    @fragment
+                    fn fs(input: VertexOutput) -> @location(0) vec4<f32> {
+                        return textureSample(tex, tex_sampler, input.uv);
+                    }
+                `;
+                
+                const displayModule = device.createShaderModule({ code: displayShaderCode });
+                
+                const displayPipeline = device.createRenderPipeline({
+                    layout: 'auto',
+                    vertex: { module: displayModule, entryPoint: 'vs' },
+                    fragment: { 
+                        module: displayModule, 
+                        entryPoint: 'fs',
+                        targets: [{ format }]
+                    },
+                    primitive: { topology: 'triangle-strip' }
+                });
+                
+                const sampler = device.createSampler({
+                    magFilter: 'linear',
+                    minFilter: 'linear'
+                });
+                
+                const displayBindGroup = device.createBindGroup({
+                    layout: displayPipeline.getBindGroupLayout(0),
+                    entries: [
+                        { binding: 0, resource: sampler },
+                        { binding: 1, resource: storageTexture.createView() }
+                    ]
+                });
+                
+                status.textContent = 'Running compute shader...';
+                
+                // Run compute shader
+                const commandEncoder = device.createCommandEncoder();
+                
+                const computePass = commandEncoder.beginComputePass();
+                computePass.setPipeline(computePipeline);
+                computePass.setBindGroup(0, computeBindGroup);
+                computePass.dispatchWorkgroups(
+                    Math.ceil(canvas.width / 8),
+                    Math.ceil(canvas.height / 8)
+                );
+                computePass.end();
+                
+                // Display result
+                const renderPass = commandEncoder.beginRenderPass({
+                    colorAttachments: [{
+                        view: context.getCurrentTexture().createView(),
+                        clearValue: { r: 0, g: 0, b: 0, a: 1 },
+                        loadOp: 'clear',
+                        storeOp: 'store'
+                    }]
+                });
+                
+                renderPass.setPipeline(displayPipeline);
+                renderPass.setBindGroup(0, displayBindGroup);
+                renderPass.draw(4);
+                renderPass.end();
+                
+                device.queue.submit([commandEncoder.finish()]);
+                
+                status.textContent = '✅ SUCCESS! You should see a red-green gradient generated by compute shader.';
+                status.className = 'status success';
+                
+            } catch (error) {
+                console.error('Compute shader test failed:', error);
+                status.textContent = `❌ FAILED: ${error.message}`;
+                status.className = 'status error';
+                
+                // Add detailed error info
+                const errorDetails = document.createElement('div');
+                errorDetails.className = 'status error';
+                errorDetails.innerHTML = `
+                    <strong>Error Details:</strong><br>
+                    <pre>${error.stack}</pre>
+                `;
+                document.body.appendChild(errorDetails);
+            }
+        }
+        
+        testComputeShader();
+    </script>
+</body>
+</html>

@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manual Cube Test</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0,0,0,0.8);
+            padding: 15px;
+            border-radius: 8px;
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+            z-index: 1000;
+            max-width: 400px;
+        }
+        button {
+            display: block;
+            margin: 5px 0;
+            padding: 8px 12px;
+            background: #333;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover { background: #555; }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <strong>🔧 Manual Cube Test</strong><br><br>
+        <div id="logs"></div><br>
+        <button onclick="testManualCube()">Test with Manual Cube</button>
+        <button onclick="showGBufferContent()">Show G-Buffer After Render</button>
+    </div>
+    
+    <canvas id="webgpu-canvas"></canvas>
+    
+    <script type="importmap">
+    {
+        "imports": {
+            "bitecs": "./node_modules/bitecs/dist/index.mjs",
+            "gl-matrix": "https://esm.sh/gl-matrix@3.4.3"
+        }
+    }
+    </script>
+    
+    <script type="module">
+        import { createWorld, addEntity } from 'bitecs';
+        
+        const logs = document.getElementById('logs');
+        let renderer, gbuffer, world, cubeEntity;
+        
+        function log(message) {
+            console.log(message);
+            logs.innerHTML += message + '<br>';
+            logs.scrollTop = logs.scrollHeight;
+        }
+        
+        async function init() {
+            try {
+                log("🎯 Initializing manual cube test...");
+                
+                // Import your systems
+                const { Renderer } = await import('./dist/renderer/Renderer.js');
+                const { GBuffer } = await import('./dist/renderer/GBuffer.js');
+                
+                const canvas = document.getElementById('webgpu-canvas');
+                renderer = await Renderer.getInstance(canvas);
+                gbuffer = new GBuffer(renderer);
+                
+                log("✅ Renderer and G-Buffer ready");
+                
+            } catch (error) {
+                log("❌ Init failed: " + error.message);
+                console.error(error);
+            }
+        }
+        
+        // Create manual cube geometry (since GeometryFactory is missing)
+        function createManualCube() {
+            // Simple cube vertices: position (x,y,z) + normal (x,y,z) = 6 floats per vertex
+            const vertices = new Float32Array([
+                // Front face
+                -1, -1,  1,   0,  0,  1,
+                 1, -1,  1,   0,  0,  1,
+                 1,  1,  1,   0,  0,  1,
+                -1,  1,  1,   0,  0,  1,
+                
+                // Back face  
+                -1, -1, -1,   0,  0, -1,
+                -1,  1, -1,   0,  0, -1,
+                 1,  1, -1,   0,  0, -1,
+                 1, -1, -1,   0,  0, -1,
+            ]);
+            
+            const indices = new Uint16Array([
+                0,  1,  2,    0,  2,  3,   // front
+                4,  5,  6,    4,  6,  7,   // back
+                8,  9, 10,    8, 10, 11,   // top
+               12, 13, 14,   12, 14, 15,   // bottom
+               16, 17, 18,   16, 18, 19,   // right
+               20, 21, 22,   20, 22, 23,   // left
+            ]);
+            
+            return { vertices, indices };
+        }
+        
+        window.testManualCube = async function() {
+            try {
+                log("🧪 Test: Manual cube with RasterRenderSystem");
+                
+                // Import components and systems
+                const { Mesh, Transform } = await import('./dist/ecs/components.js');
+                const { RasterRenderSystem } = await import('./dist/ecs/systems/RasterRenderSystem.js');
+                
+                // Create world and entity
+                world = createWorld();
+                cubeEntity = addEntity(world);
+                
+                // Set up entity components
+                Mesh.indexCount[cubeEntity] = 36; // 6 faces * 6 indices per face
+                Transform.position.x[cubeEntity] = 0;
+                Transform.position.y[cubeEntity] = 0;
+                Transform.position.z[cubeEntity] = -5; // Move back so camera can see it
+                Transform.rotation.x[cubeEntity] = 0;
+                Transform.rotation.y[cubeEntity] = 0;
+                Transform.rotation.z[cubeEntity] = 0;
+                Transform.rotation.w[cubeEntity] = 1; // Identity quaternion
+                Transform.scale.x[cubeEntity] = 1;
+                Transform.scale.y[cubeEntity] = 1;
+                Transform.scale.z[cubeEntity] = 1;
+                
+                log("✅ Entity created with Transform and Mesh components");
+                
+                // Create manual cube geometry
+                const cubeData = createManualCube();
+                
+                const vertexBuffer = renderer.device.createBuffer({
+                    size: cubeData.vertices.byteLength,
+                    usage: GPUBufferUsage.VERTEX,
+                    mappedAtCreation: true,
+                });
+                new Float32Array(vertexBuffer.getMappedRange()).set(cubeData.vertices);
+                vertexBuffer.unmap();
+                
+                const indexBuffer = renderer.device.createBuffer({
+                    size: cubeData.indices.byteLength,
+                    usage: GPUBufferUsage.INDEX,
+                    mappedAtCreation: true,
+                });
+                new Uint16Array(indexBuffer.getMappedRange()).set(cubeData.indices);
+                indexBuffer.unmap();
+                
+                log("✅ Manual cube buffers created");
+                log(`  Vertices: ${cubeData.vertices.length / 6} vertices`);
+                log(`  Indices: ${cubeData.indices.length} indices`);
+                
+                // Run RasterRenderSystem
+                log("🎯 Running RasterRenderSystem...");
+                await RasterRenderSystem(world, renderer, gbuffer, vertexBuffer, indexBuffer);
+                
+                log("✅ RasterRenderSystem completed!");
+                log("📋 Cube should now be rendered to G-Buffer textures");
+                log("💡 Click 'Show G-Buffer After Render' to see the result");
+                
+                // Clean up buffers
+                vertexBuffer.destroy();
+                indexBuffer.destroy();
+                
+            } catch (error) {
+                log("❌ Manual cube test failed: " + error.message);
+                console.error("Manual cube error:", error);
+            }
+        };
+        
+        window.showGBufferContent = async function() {
+            try {
+                log("🧪 Test: Displaying G-Buffer content");
+                
+                // Create composition shader
+                const compositionShader = `
+@vertex
+fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f {
+    var pos = array<vec2f, 6>(
+        vec2f(-1.0, -1.0), vec2f( 1.0, -1.0), vec2f(-1.0,  1.0),
+        vec2f(-1.0,  1.0), vec2f( 1.0, -1.0), vec2f( 1.0,  1.0)
+    );
+    return vec4f(pos[vertexIndex], 0.0, 1.0);
+}
+
+@group(0) @binding(0) var inputTexture: texture_2d<f32>;
+
+@fragment
+fn fs_main(@builtin(position) fragCoord: vec4f) -> @location(0) vec4f {
+    let coords = vec2i(fragCoord.xy);
+    let color = textureLoad(inputTexture, coords, 0);
+    // Show albedo with enhanced visibility
+    let enhanced = color.rgb * 2.0; // Brighten if values are small
+    return vec4f(enhanced, 1.0);
+}
+`;
+                
+                const shaderModule = renderer.device.createShaderModule({ code: compositionShader });
+                const pipeline = renderer.device.createRenderPipeline({
+                    layout: 'auto',
+                    vertex: { module: shaderModule, entryPoint: 'vs_main' },
+                    fragment: { 
+                        module: shaderModule, 
+                        entryPoint: 'fs_main',
+                        targets: [{ format: renderer.format }],
+                    },
+                    primitive: { topology: 'triangle-list' },
+                });
+                
+                // Display albedo texture
+                const bindGroup = renderer.device.createBindGroup({
+                    layout: pipeline.getBindGroupLayout(0),
+                    entries: [{ binding: 0, resource: gbuffer.views.albedo }],
+                });
+                
+                const encoder = renderer.device.createCommandEncoder();
+                const pass = encoder.beginRenderPass({
+                    colorAttachments: [{
+                        view: renderer.context.getCurrentTexture().createView(),
+                        clearValue: { r: 0, g: 0, b: 0, a: 1 },
+                        loadOp: 'clear',
+                        storeOp: 'store'
+                    }]
+                });
+                
+                pass.setPipeline(pipeline);
+                pass.setBindGroup(0, bindGroup);
+                pass.draw(6);
+                pass.end();
+                renderer.device.queue.submit([encoder.finish()]);
+                
+                log("✅ Displaying G-Buffer albedo texture");
+                log("🔍 If cube was rendered, you should see colored geometry!");
+                log("🔍 If still black, then RasterRenderSystem isn't writing to G-Buffer");
+                
+            } catch (error) {
+                log("❌ G-Buffer display failed: " + error.message);
+                console.error(error);
+            }
+        };
+        
+        init();
+    </script>
+</body>
+</html>
